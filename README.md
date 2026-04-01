@@ -1,0 +1,2 @@
+# flashsale
+Graduation project
