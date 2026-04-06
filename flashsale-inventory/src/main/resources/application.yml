@@ -31,14 +31,6 @@ spring:
           max-active: 8
           max-idle: 8
           min-idle: 0
-  # RocketMQ
-  rocketmq:
-    name-server: localhost:9876
-    producer:
-      group: stock-deduct-producer-group
-      send-message-timeout: 3000
-      retry-times-when-send-failed: 2
-
 # MyBatis Plus
 mybatis-plus:
   configuration:
@@ -55,3 +47,11 @@ mybatis-plus:
 logging:
   level:
     com.flashsale: debug
+
+# RocketMQ
+rocketmq:
+  name-server: localhost:9876
+  producer:
+    group: stock-deduct-producer-group
+    send-message-timeout: 3000
+    retry-times-when-send-failed: 2
