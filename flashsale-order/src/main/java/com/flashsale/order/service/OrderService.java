@@ -3,10 +3,11 @@ package com.flashsale.order.service;
 import cn.hutool.core.lang.Snowflake;
 import cn.hutool.core.util.IdUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.flashsale.common.dto.StockDeductRequest;
+import com.flashsale.common.dto.StockDeductMessage;
 import com.flashsale.common.ErrorCode;
 import com.flashsale.common.constant.MqConstant;
 import com.flashsale.common.exception.BusinessException;
-import com.flashsale.inventory.service.InventoryService.StockDeductMessage;
 import com.flashsale.order.dto.SeckillRequest;
 import com.flashsale.order.entity.OrderInfo;
 import com.flashsale.order.entity.OrderItem;
@@ -56,7 +57,7 @@ public class OrderService {
         String orderNo = generateOrderNo();
 
         // 构造库存扣减请求
-        InventoryService.StockDeductRequest deductRequest = new InventoryService.StockDeductRequest();
+        StockDeductRequest deductRequest = new StockDeductRequest();
         deductRequest.setOrderNo(orderNo);
         deductRequest.setActivityId(request.getActivityId());
         deductRequest.setItemId(request.getItemId());

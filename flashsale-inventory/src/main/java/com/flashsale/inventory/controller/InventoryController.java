@@ -1,7 +1,7 @@
 package com.flashsale.inventory.controller;
 
 import com.flashsale.common.Result;
-import com.flashsale.inventory.dto.StockDeductRequest;
+import com.flashsale.common.dto.StockDeductRequest;
 import com.flashsale.inventory.service.InventoryService;
 import com.flashsale.inventory.vo.InventoryInfoResponse;
 import com.flashsale.inventory.vo.StockDeductResponse;

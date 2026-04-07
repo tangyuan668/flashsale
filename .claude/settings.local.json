@@ -3,7 +3,8 @@
     "allow": [
       "Bash(find:*)",
       "Bash(dir:*)",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(\"F:\\\\develop_tools\\\\jdk-17.0.16_windows-x64_bin_Compressed Archive\\\\jdk-17.0.16\\\\bin\\\\javac\":*)"
     ]
   }
 }

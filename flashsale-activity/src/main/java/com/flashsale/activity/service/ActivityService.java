@@ -1,6 +1,7 @@
 package com.flashsale.activity.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.flashsale.activity.dto.ActivityCreateRequest;
 import com.flashsale.activity.entity.Activity;
 import com.flashsale.activity.entity.ActivityItem;
@@ -261,7 +262,7 @@ public class ActivityService {
 
         // 将待开始且已到开始时间的活动更新为进行中
         activityMapper.update(null,
-                new com.baomidou.mybatisplus.core.update.LambdaUpdateWrapper<Activity>()
+                new LambdaUpdateWrapper<Activity>()
                         .set(Activity::getStatus, 1)
                         .eq(Activity::getStatus, 0)
                         .le(Activity::getStartTime, now)
@@ -270,7 +271,7 @@ public class ActivityService {
 
         // 将进行中且已过结束时间的活动更新为已结束
         activityMapper.update(null,
-                new com.baomidou.mybatisplus.core.update.LambdaUpdateWrapper<Activity>()
+                new LambdaUpdateWrapper<Activity>()
                         .set(Activity::getStatus, 2)
                         .eq(Activity::getStatus, 1)
                         .lt(Activity::getEndTime, now)

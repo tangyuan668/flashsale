@@ -176,11 +176,11 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
         return org.springframework.data.redis.core.script.RedisScript.of(LUA_SCRIPT, String.class);
     }
 
-    private Iterable<String> keys(String key) {
+    private java.util.List<String> keys(String key) {
         return java.util.Collections.singletonList(key);
     }
 
-    private Iterable<String> values(String... values) {
+    private java.util.List<String> values(String... values) {
         return java.util.List.of(values);
     }
 

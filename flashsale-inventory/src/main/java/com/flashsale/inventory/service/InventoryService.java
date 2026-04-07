@@ -4,8 +4,9 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.flashsale.common.ErrorCode;
 import com.flashsale.common.constant.MqConstant;
 import com.flashsale.common.constant.RedisConstant;
+import com.flashsale.common.dto.StockDeductMessage;
+import com.flashsale.common.dto.StockDeductRequest;
 import com.flashsale.common.exception.BusinessException;
-import com.flashsale.inventory.dto.StockDeductRequest;
 import com.flashsale.inventory.entity.Inventory;
 import com.flashsale.inventory.entity.InventoryLog;
 import com.flashsale.inventory.mapper.InventoryLogMapper;
@@ -131,9 +132,11 @@ public class InventoryService {
         Long result = redisTemplate.execute(
                 script,
                 Collections.singletonList(stockKey),
-                String.valueOf(request.getQuantity()),
-                String.valueOf(request.getUserId()),
-                request.getOrderNo()
+                new Object[]{
+                        String.valueOf(request.getQuantity()),
+                        String.valueOf(request.getUserId()),
+                        request.getOrderNo()
+                }
         );
 
         if (result == null) {
@@ -170,8 +173,10 @@ public class InventoryService {
         Long result = redisTemplate.execute(
                 script,
                 Collections.singletonList(stockKey),
-                String.valueOf(quantity),
-                String.valueOf(userId)
+                new Object[]{
+                        String.valueOf(quantity),
+                        String.valueOf(userId)
+                }
         );
 
         log.info("库存回滚: orderNo={}, activityId={}, itemId={}, result={}",
@@ -217,18 +222,5 @@ public class InventoryService {
         } catch (Exception e) {
             log.error("发送库存扣减消息失败: orderNo={}", request.getOrderNo(), e);
         }
-    }
-
-    /**
-     * 库存扣减消息
-     */
-    @lombok.Data
-    public static class StockDeductMessage {
-        private String orderNo;
-        private Long activityId;
-        private Long itemId;
-        private Integer quantity;
-        private Long userId;
-        private Boolean success;
     }
 }
