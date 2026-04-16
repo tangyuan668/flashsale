@@ -31,6 +31,10 @@ public class SeckillResponse {
         return new SeckillResponse(true, orderNo, "下单成功");
     }
 
+    public static SeckillResponse processing(String orderNo) {
+        return new SeckillResponse(null, orderNo, "下单处理中");
+    }
+
     public static SeckillResponse fail(String message) {
         return new SeckillResponse(false, null, message);
     }

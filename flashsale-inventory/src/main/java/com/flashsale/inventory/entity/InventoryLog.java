@@ -34,6 +34,11 @@ public class InventoryLog {
     private String orderNo;
 
     /**
+     * 用户ID
+     */
+    private Long userId;
+
+    /**
      * 变动类型: 1-扣减, 2-回滚, 3-释放冻结
      */
     private Integer changeType;

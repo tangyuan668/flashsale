@@ -35,6 +35,7 @@ CREATE TABLE `inventory_log` (
     `activity_id` BIGINT NOT NULL COMMENT '活动ID',
     `item_id` BIGINT NOT NULL COMMENT '商品ID',
     `order_no` VARCHAR(64) DEFAULT NULL COMMENT '订单号',
+    `user_id` BIGINT DEFAULT NULL COMMENT '用户ID',
     `change_type` TINYINT NOT NULL COMMENT '变动类型: 1-扣减, 2-回滚, 3-释放冻结',
     `change_amount` INT NOT NULL COMMENT '变动数量',
     `before_stock` INT NOT NULL COMMENT '变动前库存',

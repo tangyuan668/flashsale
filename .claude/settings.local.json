@@ -4,7 +4,9 @@
       "Bash(find:*)",
       "Bash(dir:*)",
       "Bash(done)",
-      "Bash(\"F:\\\\develop_tools\\\\jdk-17.0.16_windows-x64_bin_Compressed Archive\\\\jdk-17.0.16\\\\bin\\\\javac\":*)"
+      "Bash(\"F:\\\\develop_tools\\\\jdk-17.0.16_windows-x64_bin_Compressed Archive\\\\jdk-17.0.16\\\\bin\\\\javac\":*)",
+      "Bash(del:*)",
+      "mcp__zai-mcp-server__extract_text_from_screenshot"
     ]
   }
 }

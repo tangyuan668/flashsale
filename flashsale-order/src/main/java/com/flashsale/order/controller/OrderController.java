@@ -4,6 +4,7 @@ import com.flashsale.common.Result;
 import com.flashsale.order.dto.SeckillRequest;
 import com.flashsale.order.service.OrderService;
 import com.flashsale.order.vo.OrderDetailResponse;
+import com.flashsale.order.vo.OrderStatusResponse;
 import com.flashsale.order.vo.SeckillResponse;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
@@ -31,8 +32,9 @@ public class OrderController {
     public Result<SeckillResponse> seckill(@RequestHeader("X-User-Id") Long userId,
                                              @Valid @RequestBody SeckillRequest request) {
         SeckillResponse response = orderService.seckill(userId, request);
-        if (Boolean.TRUE.equals(response.getSuccess())) {
-            return Result.ok("下单成功，请尽快支付", response);
+        // 成功或处理中都返回成功，前端根据 success 字段判断是否需要轮询
+        if (Boolean.TRUE.equals(response.getSuccess()) || response.getSuccess() == null) {
+            return Result.ok("下单已提交，请查询结果", response);
         } else {
             return Result.fail(response.getMessage());
         }
@@ -45,6 +47,16 @@ public class OrderController {
     @GetMapping("/{orderNo}")
     public Result<OrderDetailResponse> getOrderDetail(@PathVariable("orderNo") String orderNo) {
         OrderDetailResponse response = orderService.getOrderDetail(orderNo);
+        return Result.ok(response);
+    }
+
+    /**
+     * 获取订单状态（用于轮询）
+     * GET /api/order/{orderNo}/status
+     */
+    @GetMapping("/{orderNo}/status")
+    public Result<OrderStatusResponse> getOrderStatus(@PathVariable("orderNo") String orderNo) {
+        OrderStatusResponse response = orderService.getOrderStatus(orderNo);
         return Result.ok(response);
     }
 
@@ -67,5 +79,16 @@ public class OrderController {
                                       @RequestParam(value = "reason", required = false) String reason) {
         orderService.cancelOrder(orderNo, reason != null ? reason : "用户取消");
         return Result.ok("取消成功", null);
+    }
+
+    /**
+     * 内部接口：检查订单是否存在
+     * GET /order/internal/exists?orderNo=xxx
+     * 用于库存服务补偿回滚时检查订单状态
+     */
+    @GetMapping("/internal/exists")
+    public Result<Boolean> checkOrderExists(@RequestParam("orderNo") String orderNo) {
+        boolean exists = orderService.checkOrderExists(orderNo);
+        return Result.ok(exists);
     }
 }
