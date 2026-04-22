@@ -73,11 +73,11 @@ public class RateLimitFilter implements GlobalFilter, Ordered {
             "    current = current - requested " +
             "    redis.call('HMSET', key, 'tokens', current, 'last_refill', last_refill) " +
             "    redis.call('EXPIRE', key, 3600) " +
-            "    return 1 " +
+            "    return '1' " +
             "else " +
             "    redis.call('HMSET', key, 'tokens', current, 'last_refill', last_refill) " +
             "    redis.call('EXPIRE', key, 3600) " +
-            "    return 0 " +
+            "    return '0' " +
             "end";
 
     /**

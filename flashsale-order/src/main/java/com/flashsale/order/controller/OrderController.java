@@ -45,8 +45,9 @@ public class OrderController {
      * GET /api/order/{orderNo}
      */
     @GetMapping("/{orderNo}")
-    public Result<OrderDetailResponse> getOrderDetail(@PathVariable("orderNo") String orderNo) {
-        OrderDetailResponse response = orderService.getOrderDetail(orderNo);
+    public Result<OrderDetailResponse> getOrderDetail(@RequestHeader("X-User-Id") Long userId,
+                                                       @PathVariable("orderNo") String orderNo) {
+        OrderDetailResponse response = orderService.getOrderDetail(orderNo, userId);
         return Result.ok(response);
     }
 
@@ -75,9 +76,10 @@ public class OrderController {
      * POST /api/order/{orderNo}/cancel
      */
     @PostMapping("/{orderNo}/cancel")
-    public Result<Void> cancelOrder(@PathVariable("orderNo") String orderNo,
+    public Result<Void> cancelOrder(@RequestHeader("X-User-Id") Long userId,
+                                      @PathVariable("orderNo") String orderNo,
                                       @RequestParam(value = "reason", required = false) String reason) {
-        orderService.cancelOrder(orderNo, reason != null ? reason : "用户取消");
+        orderService.cancelOrder(userId, orderNo, reason != null ? reason : "用户取消");
         return Result.ok("取消成功", null);
     }
 
@@ -90,5 +92,20 @@ public class OrderController {
     public Result<Boolean> checkOrderExists(@RequestParam("orderNo") String orderNo) {
         boolean exists = orderService.checkOrderExists(orderNo);
         return Result.ok(exists);
+    }
+
+    /**
+     * 内部接口：检查用户对指定商品是否有成功的订单（排除指定订单号）
+     * GET /order/internal/hasSuccessOrder
+     * 用于库存服务补偿回滚时判断用户是否已重试成功
+     */
+    @GetMapping("/internal/hasSuccessOrder")
+    public Result<Boolean> checkUserHasSuccessOrder(
+            @RequestParam("userId") Long userId,
+            @RequestParam("activityId") Long activityId,
+            @RequestParam("itemId") Long itemId,
+            @RequestParam("excludeOrderNo") String excludeOrderNo) {
+        boolean hasSuccess = orderService.checkUserHasSuccessOrder(userId, activityId, itemId, excludeOrderNo);
+        return Result.ok(hasSuccess);
     }
 }

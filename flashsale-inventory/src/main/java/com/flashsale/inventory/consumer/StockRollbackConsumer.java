@@ -1,8 +1,8 @@
-package com.flashsale.order.consumer;
+package com.flashsale.inventory.consumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.flashsale.common.dto.StockDeductMessage;
-import com.flashsale.order.service.OrderService;
+import com.flashsale.common.dto.StockRollbackMessage;
+import com.flashsale.inventory.service.InventoryService;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
 import org.apache.rocketmq.spring.core.RocketMQListener;
@@ -13,19 +13,19 @@ import org.springframework.stereotype.Component;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 订单结果消费者
- * 消费库存扣减结果消息，创建订单或记录失败
+ * 库存回滚消费者
+ * 消费库存回滚消息，执行库存回滚
  */
 @Slf4j
 @Component
 @RocketMQMessageListener(
-        topic = "STOCK_RESULT_TOPIC",
-        consumerGroup = "ORDER_RESULT_CONSUMER_GROUP"
+        topic = "STOCK_ROLLBACK_TOPIC",
+        consumerGroup = "STOCK_ROLLBACK_CONSUMER_GROUP"
 )
-public class OrderConsumer implements RocketMQListener<String> {
+public class StockRollbackConsumer implements RocketMQListener<String> {
 
     @Autowired
-    private OrderService orderService;
+    private InventoryService inventoryService;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -33,20 +33,19 @@ public class OrderConsumer implements RocketMQListener<String> {
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
 
-    private static final String DEDUPE_KEY_PREFIX = "d:order:";
-    private static final String DEDUPE_PROCESSING_PREFIX = "d:order:processing:";
+    private static final String DEDUPE_KEY_PREFIX = "d:rollback:";
+    private static final String DEDUPE_PROCESSING_PREFIX = "d:rollback:processing:";
     private static final long DEDUPE_TIMEOUT_SECONDS = 1800; // 30分钟，覆盖 RocketMQ 最大重试间隔
 
     @Override
     public void onMessage(String message) {
         String orderNo = null;
         try {
-            log.info("接收到库存扣减结果消息: {}", message);
+            log.info("接收到库存回滚消息: {}", message);
 
-            // 解析库存扣减结果消息
-            StockDeductMessage resultMessage =
-                    objectMapper.readValue(message, StockDeductMessage.class);
-            orderNo = resultMessage.getOrderNo();
+            // 解析消息
+            StockRollbackMessage rollbackMessage = objectMapper.readValue(message, StockRollbackMessage.class);
+            orderNo = rollbackMessage.getOrderNo();
 
             // 1. 检查是否已成功处理过
             String successKey = DEDUPE_KEY_PREFIX + orderNo;
@@ -63,16 +62,23 @@ public class OrderConsumer implements RocketMQListener<String> {
                 return;
             }
 
-            // 3. 处理库存扣减结果
-            orderService.processStockDeductResult(resultMessage);
+            // 3. 执行库存回滚
+            inventoryService.rollbackStock(
+                    rollbackMessage.getOrderNo(),
+                    rollbackMessage.getActivityId(),
+                    rollbackMessage.getItemId(),
+                    rollbackMessage.getQuantity(),
+                    rollbackMessage.getUserId()
+            );
 
             // 4. 处理成功，设置永久成功标记
             redisTemplate.opsForValue().set(successKey, "1");
             redisTemplate.delete(processingKey);
 
+            log.info("库存回滚处理完成: orderNo={}", orderNo);
+
         } catch (Exception e) {
-            log.error("处理库存扣减结果消息失败: orderNo={}, message={}",
-                    orderNo, message, e);
+            log.error("处理库存回滚消息失败: orderNo={}, message={}", orderNo, message, e);
 
             // 判断是否为可重试的错误
             if (isRetryableError(e)) {

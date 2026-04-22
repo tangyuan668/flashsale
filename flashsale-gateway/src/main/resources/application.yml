@@ -9,6 +9,7 @@ spring:
       discovery:
         server-addr: localhost:8848
         namespace: flashsale
+        ip: 127.0.0.1
       config:
         server-addr: localhost:8848
         namespace: flashsale
@@ -25,28 +26,28 @@ spring:
           predicates:
             - Path=/api/user/**
           filters:
-            - StripPrefix=2
+            - StripPrefix=1
         # Activity服务路由
         - id: flashsale-activity
           uri: lb://flashsale-activity
           predicates:
             - Path=/api/activity/**
           filters:
-            - StripPrefix=2
+            - StripPrefix=1
         # Inventory服务路由
         - id: flashsale-inventory
           uri: lb://flashsale-inventory
           predicates:
             - Path=/api/inventory/**
           filters:
-            - StripPrefix=2
+            - StripPrefix=1
         # Order服务路由
         - id: flashsale-order
           uri: lb://flashsale-order
           predicates:
             - Path=/api/order/**
           filters:
-            - StripPrefix=2
+            - StripPrefix=1
   # Redis
   data:
     redis:

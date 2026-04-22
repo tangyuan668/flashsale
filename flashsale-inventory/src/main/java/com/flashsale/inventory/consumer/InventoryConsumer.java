@@ -1,8 +1,9 @@
-package com.flashsale.order.consumer;
+package com.flashsale.inventory.consumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.flashsale.common.dto.StockDeductMessage;
-import com.flashsale.order.service.OrderService;
+import com.flashsale.common.dto.OrderCreateMessage;
+import com.flashsale.common.dto.StockDeductRequest;
+import com.flashsale.inventory.service.InventoryService;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
 import org.apache.rocketmq.spring.core.RocketMQListener;
@@ -13,19 +14,19 @@ import org.springframework.stereotype.Component;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 订单结果消费者
- * 消费库存扣减结果消息，创建订单或记录失败
+ * 库存消息消费者
+ * 消费秒杀订单消息，执行库存扣减
  */
 @Slf4j
 @Component
 @RocketMQMessageListener(
-        topic = "STOCK_RESULT_TOPIC",
-        consumerGroup = "ORDER_RESULT_CONSUMER_GROUP"
+        topic = "SECKILL_ORDER_TOPIC",
+        consumerGroup = "INVENTORY_DEDUCT_CONSUMER_GROUP"
 )
-public class OrderConsumer implements RocketMQListener<String> {
+public class InventoryConsumer implements RocketMQListener<String> {
 
     @Autowired
-    private OrderService orderService;
+    private InventoryService inventoryService;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -33,20 +34,19 @@ public class OrderConsumer implements RocketMQListener<String> {
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
 
-    private static final String DEDUPE_KEY_PREFIX = "d:order:";
-    private static final String DEDUPE_PROCESSING_PREFIX = "d:order:processing:";
+    private static final String DEDUPE_KEY_PREFIX = "d:inventory:";
+    private static final String DEDUPE_PROCESSING_PREFIX = "d:inventory:processing:";
     private static final long DEDUPE_TIMEOUT_SECONDS = 1800; // 30分钟，覆盖 RocketMQ 最大重试间隔
 
     @Override
     public void onMessage(String message) {
         String orderNo = null;
         try {
-            log.info("接收到库存扣减结果消息: {}", message);
+            log.info("库存服务接收到秒杀订单消息: {}", message);
 
-            // 解析库存扣减结果消息
-            StockDeductMessage resultMessage =
-                    objectMapper.readValue(message, StockDeductMessage.class);
-            orderNo = resultMessage.getOrderNo();
+            // 解析消息
+            OrderCreateMessage orderMessage = objectMapper.readValue(message, OrderCreateMessage.class);
+            orderNo = orderMessage.getOrderNo();
 
             // 1. 检查是否已成功处理过
             String successKey = DEDUPE_KEY_PREFIX + orderNo;
@@ -63,16 +63,25 @@ public class OrderConsumer implements RocketMQListener<String> {
                 return;
             }
 
-            // 3. 处理库存扣减结果
-            orderService.processStockDeductResult(resultMessage);
+            // 构造库存扣减请求
+            StockDeductRequest deductRequest = new StockDeductRequest();
+            deductRequest.setOrderNo(orderMessage.getOrderNo());
+            deductRequest.setUserId(orderMessage.getUserId());
+            deductRequest.setActivityId(orderMessage.getActivityId());
+            deductRequest.setItemId(orderMessage.getItemId());
+            deductRequest.setQuantity(orderMessage.getQuantity());
 
-            // 4. 处理成功，设置永久成功标记
+            // 执行库存扣减（会自动发送结果消息到MQ）
+            inventoryService.deductStock(deductRequest);
+
+            // 处理成功，设置永久成功标记
             redisTemplate.opsForValue().set(successKey, "1");
             redisTemplate.delete(processingKey);
 
+            log.info("库存扣减处理完成: orderNo={}", orderNo);
+
         } catch (Exception e) {
-            log.error("处理库存扣减结果消息失败: orderNo={}, message={}",
-                    orderNo, message, e);
+            log.error("处理库存扣减消息失败: orderNo={}, message={}", orderNo, message, e);
 
             // 判断是否为可重试的错误
             if (isRetryableError(e)) {
@@ -117,4 +126,5 @@ public class OrderConsumer implements RocketMQListener<String> {
                 || e instanceof java.net.SocketException  // Socket 异常
                 || e instanceof java.net.ConnectException; // 连接异常
     }
+
 }

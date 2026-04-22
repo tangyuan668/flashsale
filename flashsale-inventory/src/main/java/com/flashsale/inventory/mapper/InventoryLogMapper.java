@@ -23,16 +23,16 @@ public interface InventoryLogMapper extends BaseMapper<InventoryLog> {
      * @param limit      限制查询数量
      * @return 待补偿的库存扣减记录列表
      */
-    @Select("SELECT * FROM inventory_log " +
-            "WHERE change_type = 1 " +
-            "AND create_time < #{beforeTime} " +
-            "AND order_no IS NOT NULL " +
+    @Select("SELECT il.* FROM inventory_log il " +
+            "WHERE il.change_type = 1 " +
+            "AND il.create_time < #{beforeTime} " +
+            "AND il.order_no IS NOT NULL " +
             "AND NOT EXISTS (" +
-            "    SELECT 1 FROM inventory_log " +
-            "    WHERE order_no = inventory_log.order_no " +
-            "    AND change_type = 2" +
+            "    SELECT 1 FROM inventory_log il2 " +
+            "    WHERE il2.order_no = il.order_no " +
+            "    AND il2.change_type = 2" +
             ") " +
-            "ORDER BY create_time ASC " +
+            "ORDER BY il.create_time ASC " +
             "LIMIT #{limit}")
     List<InventoryLog> selectPendingCompensation(@Param("beforeTime") LocalDateTime beforeTime,
                                                    @Param("limit") int limit);
