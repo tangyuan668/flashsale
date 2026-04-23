@@ -21,7 +21,8 @@ import java.util.concurrent.TimeUnit;
 @Component
 @RocketMQMessageListener(
         topic = "SECKILL_ORDER_TOPIC",
-        consumerGroup = "INVENTORY_DEDUCT_CONSUMER_GROUP"
+        consumerGroup = "INVENTORY_DEDUCT_CONSUMER_GROUP",
+        consumeThreadNumber = 32
 )
 public class InventoryConsumer implements RocketMQListener<String> {
 
@@ -40,6 +41,7 @@ public class InventoryConsumer implements RocketMQListener<String> {
 
     @Override
     public void onMessage(String message) {
+        log.info("========== InventoryConsumer 线程数=32 配置生效测试 ==========");
         String orderNo = null;
         try {
             log.info("库存服务接收到秒杀订单消息: {}", message);

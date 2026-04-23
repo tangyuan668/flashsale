@@ -125,7 +125,7 @@
             <stringProp name="script">def token = vars.get(&quot;token&quot;)
 def userId = vars.get(&quot;userId&quot;)
 def userIndex = vars.get(&quot;user_index&quot;)
-def dir = new File(&quot;F:/develop_tools/apache-jmeter-5.6.3/apache-jmeter-5.6.3/bin/tokens&quot;)
+def dir = new File(org.apache.jmeter.services.FileServer.getFileServer().getBaseDir(), &quot;tokens&quot;)
 dir.mkdirs()
 def fileIndex = Integer.parseInt(userIndex)
 def file = new File(dir, &quot;user_${fileIndex}.csv&quot;)

@@ -201,52 +201,6 @@ public class InventoryService {
                 request.getOrderNo()
         );
 
-        // 测试1：读取Redis中的库存值
-        Long test1 = executeLua("return tonumber(redis.call('GET', KEYS[1]))", Collections.singletonList(stockKey));
-        log.info("TEST1 读库存 stockKey={}, 结果={}", stockKey, test1);
-
-        // 测试2：测试参数传递
-        Long test2 = executeLua("return tonumber(ARGV[1]) + tonumber(ARGV[2])",
-                Collections.emptyList(),
-                String.valueOf(request.getQuantity()),
-                String.valueOf(request.getUserId())
-        );
-        log.info("TEST2 参数传递 quantity={}, userId={}, 结果={}", request.getQuantity(), request.getUserId(), test2);
-
-        // 测试3：计算remaining并返回（不执行SET）
-        Long test3 = executeLua(
-                "local stock = tonumber(redis.call('GET', KEYS[1])); " +
-                "local quantity = tonumber(ARGV[1]); " +
-                "local remaining = stock - quantity; " +
-                "return remaining",
-                Collections.singletonList(stockKey),
-                String.valueOf(request.getQuantity())
-        );
-        log.info("TEST3 计算remaining 结果={}", test3);
-
-        // 测试4：执行SET后返回
-        Long test4 = executeLua(
-                "local key = KEYS[1]; " +
-                "local stock = tonumber(redis.call('GET', key)); " +
-                "local remaining = stock - 1; " +
-                "redis.call('SET', key, remaining); " +
-                "redis.call('SET', key, stock); " +
-                "return remaining",
-                Collections.singletonList(stockKey)
-        );
-        log.info("TEST4 执行SET后恢复 结果={}", test4);
-
-        // 测试5：执行SETEX后返回
-        Long test5 = executeLua(
-                "local key = KEYS[1]; " +
-                "local stock = tonumber(redis.call('GET', key)); " +
-                "redis.call('SETEX', 'test:deducting:tmp', 10, 'test'); " +
-                "redis.call('DEL', 'test:deducting:tmp'); " +
-                "return stock",
-                Collections.singletonList(stockKey)
-        );
-        log.info("TEST5 执行SETEX 结果={}", test5);
-
         log.info("Lua脚本返回值: orderNo={}, stockKey={}, result={}", request.getOrderNo(), stockKey, result);
 
         if (result == null) {

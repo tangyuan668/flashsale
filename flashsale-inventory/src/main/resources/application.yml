@@ -20,6 +20,10 @@ spring:
     url: jdbc:mysql://localhost:3306/flashsale_inventory?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
     username: root
     password: 123456
+    hikari:
+      maximum-pool-size: 50
+      minimum-idle: 10
+      connection-timeout: 10000
   # Redis
   data:
     redis:
@@ -29,9 +33,9 @@ spring:
       timeout: 3000ms
       lettuce:
         pool:
-          max-active: 8
-          max-idle: 8
-          min-idle: 0
+          max-active: 64
+          max-idle: 32
+          min-idle: 8
 # MyBatis Plus
 mybatis-plus:
   configuration:

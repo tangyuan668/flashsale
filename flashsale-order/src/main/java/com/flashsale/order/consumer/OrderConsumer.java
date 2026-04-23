@@ -20,7 +20,8 @@ import java.util.concurrent.TimeUnit;
 @Component
 @RocketMQMessageListener(
         topic = "STOCK_RESULT_TOPIC",
-        consumerGroup = "ORDER_RESULT_CONSUMER_GROUP"
+        consumerGroup = "ORDER_RESULT_CONSUMER_GROUP",
+        consumeThreadNumber = 32
 )
 public class OrderConsumer implements RocketMQListener<String> {
 
