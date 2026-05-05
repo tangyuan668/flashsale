@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.flashsale.common.constant.RedisConstant;
 import com.flashsale.common.dto.StockDeductRequest;
 import com.flashsale.common.dto.StockDeductMessage;
+import com.flashsale.common.dto.StockRollbackMessage;
 import com.flashsale.common.dto.OrderCreateMessage;
 import com.flashsale.common.ErrorCode;
 import com.flashsale.common.constant.MqConstant;
@@ -16,25 +17,29 @@ import com.flashsale.order.entity.OrderInfo;
 import com.flashsale.order.entity.OrderItem;
 import com.flashsale.order.mapper.OrderInfoMapper;
 import com.flashsale.order.mapper.OrderItemMapper;
-import com.flashsale.order.feign.ActivityFeignClient;
-import com.flashsale.order.feign.ActivityDto;
-import com.flashsale.order.feign.ActivityDto.ActivityItemDto;
 import com.flashsale.order.vo.OrderDetailResponse;
 import com.flashsale.order.vo.OrderItemVO;
 import com.flashsale.order.vo.OrderStatusResponse;
 import com.flashsale.order.vo.SeckillResponse;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.rocketmq.client.producer.SendCallback;
+import org.apache.rocketmq.client.producer.SendResult;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -58,10 +63,10 @@ public class OrderService {
     private RedisTemplate<String, Object> redisTemplate;
 
     @Autowired
-    private ActivityFeignClient activityFeignClient;
+    private LocalMessageService localMessageService;
 
     @Autowired
-    private LocalMessageService localMessageService;
+    private TransactionTemplate transactionTemplate;
 
     @Value("${order.snowflake.worker-id:1}")
     private long workerId;
@@ -81,54 +86,79 @@ public class OrderService {
      * 秒杀下单（异步处理）
      */
     public SeckillResponse seckill(Long userId, SeckillRequest request) {
-        // 0. 前置幂等检查：快速拒绝重复请求，避免浪费后续资源
         String stockKey = RedisConstant.STOCK_CACHE_PREFIX + request.getActivityId() + ":" + request.getItemId();
         String purchaseKey = "user:purchase:" + userId + ":" + stockKey;
-        if (Boolean.TRUE.equals(redisTemplate.hasKey(purchaseKey))) {
-            return SeckillResponse.fail("您已购买过该商品，每人限购一件");
-        }
         String deductingKey = "deducting:" + userId + ":" + stockKey;
-        if (Boolean.TRUE.equals(redisTemplate.hasKey(deductingKey))) {
-            return SeckillResponse.fail("订单处理中，请勿重复提交");
-        }
+        String itemKey = "activity:item:" + request.getActivityId() + ":" + request.getItemId();
 
-        // 1. 前置校验：检查活动商品信息并校验限购数量
+        // 0. Pipeline 读操作：幂等检查 + 商品信息（3次Redis调用合并为1次网络往返）
         try {
-            ActivityDto activityDto = activityFeignClient.getActivityDetail(request.getActivityId()).getData();
-            if (activityDto == null || activityDto.getItems() == null) {
-                return SeckillResponse.fail("活动或商品不存在");
+            List<Object> readResults = redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+                connection.keyCommands().exists(purchaseKey.getBytes(StandardCharsets.UTF_8));
+                connection.keyCommands().exists(deductingKey.getBytes(StandardCharsets.UTF_8));
+                connection.hashCommands().hGetAll(itemKey.getBytes(StandardCharsets.UTF_8));
+                return null;
+            });
+
+            boolean purchased = Boolean.TRUE.equals(readResults.get(0));
+            boolean deducting = Boolean.TRUE.equals(readResults.get(1));
+            @SuppressWarnings("unchecked")
+            Map<Object, Object> itemData = (Map<Object, Object>) readResults.get(2);
+
+            if (purchased) {
+                return SeckillResponse.fail("您已购买过该商品，每人限购一件");
+            }
+            if (deducting) {
+                return SeckillResponse.fail("订单处理中，请勿重复提交");
+            }
+            if (itemData == null || itemData.isEmpty()) {
+                return SeckillResponse.fail("活动或商品不存在（未预热）");
             }
 
-            // 查找目标商品
-            ActivityItemDto targetItem = activityDto.getItems().stream()
-                    .filter(item -> item.getItemId().equals(request.getItemId()))
-                    .findFirst()
-                    .orElse(null);
-
-            if (targetItem == null) {
-                return SeckillResponse.fail("商品不存在");
-            }
-
-            // 校验购买数量不超过限购数量
-            if (request.getQuantity() > targetItem.getLimitPerUser()) {
-                return SeckillResponse.fail("每人限购" + targetItem.getLimitPerUser() + "件");
+            int limitPerUser = Integer.parseInt(itemData.get("limitPerUser").toString());
+            if (request.getQuantity() > limitPerUser) {
+                return SeckillResponse.fail("每人限购" + limitPerUser + "件");
             }
 
         } catch (Exception e) {
-            log.error("获取活动信息失败: activityId={}", request.getActivityId(), e);
-            return SeckillResponse.fail("获取活动信息失败，请稍后重试");
+            log.error("Redis读取失败: activityId={}, itemId={}", request.getActivityId(), request.getItemId(), e);
+            return SeckillResponse.fail("获取商品信息失败，请稍后重试");
         }
 
-        // 2. 生成订单号
+        // 1. 生成订单号
         String orderNo = generateOrderNo();
 
-        // 3. 记录处理中的订单（5分钟超时）
+        // 2. Pipeline 写操作：记录处理中订单（3次Redis调用合并为1次网络往返）
         String processingKey = "order:processing:" + orderNo;
-        redisTemplate.opsForValue().set(processingKey, "1", 5, TimeUnit.MINUTES);
-        // 使用 ZSET 记录过期时间，便于定时任务扫描
+        Map<String, String> orderInfoMap = new HashMap<>();
+        orderInfoMap.put("userId", String.valueOf(userId));
+        orderInfoMap.put("activityId", String.valueOf(request.getActivityId()));
+        orderInfoMap.put("itemId", String.valueOf(request.getItemId()));
+        orderInfoMap.put("quantity", String.valueOf(request.getQuantity()));
         long expireTime = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(5);
-        redisTemplate.opsForZSet().add("order:processing:zset", orderNo, expireTime);
-        log.info("记录处理中订单: orderNo={}, userId={}", orderNo, userId);
+
+        try {
+            redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+                byte[] keyBytes = processingKey.getBytes(StandardCharsets.UTF_8);
+                Map<byte[], byte[]> hashFields = new HashMap<>();
+                for (Map.Entry<String, String> entry : orderInfoMap.entrySet()) {
+                    hashFields.put(entry.getKey().getBytes(StandardCharsets.UTF_8),
+                            entry.getValue().getBytes(StandardCharsets.UTF_8));
+                }
+                connection.hashCommands().hMSet(keyBytes, hashFields);
+                connection.keyCommands().expire(keyBytes, 600);
+                connection.zSetCommands().zAdd(
+                        "order:processing:zset".getBytes(StandardCharsets.UTF_8),
+                        expireTime,
+                        orderNo.getBytes(StandardCharsets.UTF_8)
+                );
+                return null;
+            });
+            log.info("记录处理中订单: orderNo={}, userId={}", orderNo, userId);
+        } catch (Exception e) {
+            log.error("Redis写入失败: orderNo={}", orderNo, e);
+            return SeckillResponse.fail("系统繁忙，请稍后重试");
+        }
 
         // 4. 构造订单创建消息
         OrderCreateMessage message = new OrderCreateMessage();
@@ -141,16 +171,18 @@ public class OrderService {
         // 5. 保存到本地消息表
         localMessageService.saveMessage(orderNo, MqConstant.SECKILL_ORDER_TOPIC, message);
 
-        // 6. 尝试发送 MQ（发送失败由定时任务重试）
-        try {
-            rocketMQTemplate.syncSend(MqConstant.SECKILL_ORDER_TOPIC, message);
-            log.info("发送秒杀订单消息成功: orderNo={}, userId={}", orderNo, userId);
-            // 立即更新本地消息表状态为已发送
-            localMessageService.markMessageAsSent(orderNo);
-        } catch (Exception e) {
-            log.error("发送秒杀订单消息失败，已保存到本地消息表等待重试: orderNo={}", orderNo, e);
-            // 消息已保存到本地消息表，定时任务会重试，用户可以正常获取处理中状态
-        }
+        // 6. 异步发送 MQ（本地消息表已保证可靠性，无需同步等待Broker ACK）
+        rocketMQTemplate.asyncSend(MqConstant.SECKILL_ORDER_TOPIC, message, new SendCallback() {
+            @Override
+            public void onSuccess(SendResult result) {
+                localMessageService.markMessageAsSent(orderNo);
+                log.info("发送秒杀订单消息成功: orderNo={}, userId={}", orderNo, userId);
+            }
+            @Override
+            public void onException(Throwable e) {
+                log.error("发送秒杀订单消息失败，已保存到本地消息表等待重试: orderNo={}", orderNo, e);
+            }
+        });
 
         // 7. 返回处理中状态
         return SeckillResponse.processing(orderNo);
@@ -170,8 +202,8 @@ public class OrderService {
 
     /**
      * 处理库存扣减结果（MQ消费者）
+     * 不使用 @Transactional，Redis 检查在事务外执行，仅 DB 写入包裹在 TransactionTemplate 中
      */
-    @Transactional(rollbackFor = Exception.class)
     public void processStockDeductResult(StockDeductMessage message) {
         log.info("处理库存扣减结果: orderNo={}, success={}", message.getOrderNo(), message.getSuccess());
 
@@ -179,13 +211,17 @@ public class OrderService {
             // 库存扣减成功，创建订单
             createOrderAfterStockDeducted(message);
         } else {
-            // 库存扣减失败，在Redis中记录失败状态
+            // 库存扣减失败，Pipeline：记录失败状态 + 清理扣减中标记
             String failKey = "order:fail:" + message.getOrderNo();
-            redisTemplate.opsForValue().set(failKey, "库存不足或已售罄", 24, TimeUnit.HOURS);
-            // 清理扣减中标记（使用与 InventoryService 相同的 key 格式）
             String stockKey = RedisConstant.STOCK_CACHE_PREFIX + message.getActivityId() + ":" + message.getItemId();
             String deductingKey = "deducting:" + message.getUserId() + ":" + stockKey;
-            redisTemplate.delete(deductingKey);
+            redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+                connection.stringCommands().set(failKey.getBytes(StandardCharsets.UTF_8),
+                        "\"库存不足或已售罄\"".getBytes(StandardCharsets.UTF_8));
+                connection.keyCommands().expire(failKey.getBytes(StandardCharsets.UTF_8), 86400);
+                connection.keyCommands().del(deductingKey.getBytes(StandardCharsets.UTF_8));
+                return null;
+            });
             log.info("库存扣减失败，已记录: orderNo={}", message.getOrderNo());
         }
     }
@@ -194,153 +230,195 @@ public class OrderService {
      * 库存扣减成功后创建订单
      */
     private void createOrderAfterStockDeducted(StockDeductMessage message) {
-        // 0. 检查订单是否已被补偿（库存已回滚）
-        // 场景：库存补偿任务已回滚库存，但库存结果消息延迟到达
-        // 如果订单已被补偿，则拒绝创建订单，避免数据不一致
-        String compensatedKey = "order:compensated:" + message.getOrderNo();
-        Boolean isCompensated = redisTemplate.hasKey(compensatedKey);
-        if (Boolean.TRUE.equals(isCompensated)) {
-            String reason = redisTemplate.opsForValue().get(compensatedKey).toString();
-            log.warn("订单已被补偿，拒绝创建: orderNo={}, reason={}", message.getOrderNo(), reason);
-
-            // 记录失败状态，用户可看到失败原因
-            String failKey = "order:fail:" + message.getOrderNo();
-            String failReason = "订单处理超时，请重新下单";
-            redisTemplate.opsForValue().set(failKey, failReason, 24, TimeUnit.HOURS);
-
-            // 清理扣减中标记
-            String stockKey = RedisConstant.STOCK_CACHE_PREFIX + message.getActivityId() + ":" + message.getItemId();
-            String deductingKey = "deducting:" + message.getUserId() + ":" + stockKey;
-            redisTemplate.delete(deductingKey);
-            // 清理处理中标记
-            redisTemplate.delete("order:processing:" + message.getOrderNo());
-            redisTemplate.opsForZSet().remove("order:processing:zset", message.getOrderNo());
-
-            return;
-        }
-
-        // 0.5. 检查用户是否已购买（防止延迟消息重复创建订单）
-        // 场景：用户重试成功创建订单后，旧的延迟库存结果消息到达
-        // 如果用户已有购买标记，则拒绝创建，避免重复订单
+        String orderNo = message.getOrderNo();
         String stockKey = RedisConstant.STOCK_CACHE_PREFIX + message.getActivityId() + ":" + message.getItemId();
         String purchaseKey = "user:purchase:" + message.getUserId() + ":" + stockKey;
-        Boolean hasPurchased = redisTemplate.hasKey(purchaseKey);
-        if (Boolean.TRUE.equals(hasPurchased)) {
-            String existingOrderNo = redisTemplate.opsForValue().get(purchaseKey).toString();
-            log.warn("用户已有订单，拒绝创建延迟订单: orderNo={}, existingOrderNo={}",
-                    message.getOrderNo(), existingOrderNo);
+        String deductingKey = "deducting:" + message.getUserId() + ":" + stockKey;
+        String itemKey = "activity:item:" + message.getActivityId() + ":" + message.getItemId();
+        String deadlineFailKey = "order:fail:" + orderNo;
+        String rollbackSentKey = "stock:rollback:sent:" + orderNo;
+        String processingKey = "order:processing:" + orderNo;
+        String zsetKey = "order:processing:zset";
 
-            // 记录失败状态，用户可看到失败原因
-            String failKey = "order:fail:" + message.getOrderNo();
-            String failReason = "订单重复，您已有成功订单";
-            redisTemplate.opsForValue().set(failKey, failReason, 24, TimeUnit.HOURS);
+        // === Pipeline 读批次：3 次检查合并为 1 次 RTT ===
+        try {
+            List<Object> readResults = redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+                connection.keyCommands().exists(deadlineFailKey.getBytes(StandardCharsets.UTF_8));
+                connection.stringCommands().get(purchaseKey.getBytes(StandardCharsets.UTF_8));
+                connection.hashCommands().hGetAll(itemKey.getBytes(StandardCharsets.UTF_8));
+                return null;
+            });
 
-            // 发送库存回滚消息
+            boolean hasDeadlineFail = Boolean.TRUE.equals(readResults.get(0));
+            byte[] purchaseBytes = (byte[]) readResults.get(1);
+            @SuppressWarnings("unchecked")
+            Map<Object, Object> itemData = (Map<Object, Object>) readResults.get(2);
+
+            // --- 分支 1：订单已超时失败 ---
+            if (hasDeadlineFail) {
+                log.warn("订单已超时失败，拒绝创建迟到订单: orderNo={}", orderNo);
+                handleLateOrder(orderNo, message, rollbackSentKey, stockKey, deductingKey, processingKey, zsetKey);
+                return;
+            }
+
+            // --- 分支 2：用户已购买 ---
+            if (purchaseBytes != null) {
+                String existingOrderNo = new String(purchaseBytes, StandardCharsets.UTF_8);
+                log.warn("用户已有订单，拒绝创建延迟订单: orderNo={}, existingOrderNo={}", orderNo, existingOrderNo);
+                handleDuplicateOrder(orderNo, message, existingOrderNo, deadlineFailKey, processingKey, zsetKey);
+                return;
+            }
+
+            // --- 分支 3：商品信息不存在 ---
+            if (itemData == null || itemData.isEmpty()) {
+                log.error("商品信息不存在（未预热）: activityId={}, itemId={}", message.getActivityId(), message.getItemId());
+                redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+                    connection.stringCommands().set(deadlineFailKey.getBytes(StandardCharsets.UTF_8),
+                            "\"商品信息不存在\"".getBytes(StandardCharsets.UTF_8));
+                    connection.keyCommands().expire(deadlineFailKey.getBytes(StandardCharsets.UTF_8), 86400);
+                    connection.keyCommands().del(processingKey.getBytes(StandardCharsets.UTF_8));
+                    connection.keyCommands().del(deductingKey.getBytes(StandardCharsets.UTF_8));
+                    connection.zSetCommands().zRem(zsetKey.getBytes(StandardCharsets.UTF_8),
+                            orderNo.getBytes(StandardCharsets.UTF_8));
+                    return null;
+                });
+                return;
+            }
+
+            // --- 正常路径：创建订单 ---
+            String itemName = itemData.get("itemName") != null ? itemData.get("itemName").toString() : "";
+            String itemImage = itemData.get("itemImage") != null ? itemData.get("itemImage").toString() : "";
+            BigDecimal seckillPrice = new BigDecimal(itemData.get("seckillPrice").toString());
+
+            // TransactionTemplate 包裹 DB 写入，减少事务持有时间
+            final OrderInfo orderInfo = new OrderInfo();
+            orderInfo.setOrderNo(orderNo);
+            orderInfo.setUserId(message.getUserId());
+            orderInfo.setActivityId(message.getActivityId());
+            orderInfo.setTotalAmount(seckillPrice.multiply(BigDecimal.valueOf(message.getQuantity())));
+            orderInfo.setStatus(0);
+            orderInfo.setCreateTime(LocalDateTime.now());
+
+            final OrderItem orderItem = new OrderItem();
+            orderItem.setOrderNo(orderNo);
+            orderItem.setItemId(message.getItemId());
+            orderItem.setItemName(itemName);
+            orderItem.setItemImage(itemImage);
+            orderItem.setPrice(seckillPrice);
+            orderItem.setQuantity(message.getQuantity());
+            orderItem.setTotalAmount(seckillPrice.multiply(BigDecimal.valueOf(message.getQuantity())));
+            orderItem.setCreateTime(LocalDateTime.now());
+
+            transactionTemplate.executeWithoutResult(status -> {
+                orderInfoMapper.insert(orderInfo);
+                orderItem.setOrderId(orderInfo.getId());
+                orderItemMapper.insert(orderItem);
+            });
+
+            // === Pipeline 写批次：5 次 Redis 操作合并为 1 次 RTT ===
+            String orderKey = "order:timeout:" + orderNo;
+            byte[] orderTimeoutValue = String.valueOf(orderInfo.getId()).getBytes(StandardCharsets.UTF_8);
+            redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+                connection.stringCommands().set(orderKey.getBytes(StandardCharsets.UTF_8), orderTimeoutValue);
+                connection.keyCommands().expire(orderKey.getBytes(StandardCharsets.UTF_8), 900); // 15 min
+                connection.stringCommands().set(purchaseKey.getBytes(StandardCharsets.UTF_8),
+                        orderNo.getBytes(StandardCharsets.UTF_8));
+                connection.keyCommands().expire(purchaseKey.getBytes(StandardCharsets.UTF_8), 86400); // 24h
+                connection.keyCommands().del(deductingKey.getBytes(StandardCharsets.UTF_8));
+                connection.keyCommands().del(processingKey.getBytes(StandardCharsets.UTF_8));
+                connection.zSetCommands().zRem(zsetKey.getBytes(StandardCharsets.UTF_8),
+                        orderNo.getBytes(StandardCharsets.UTF_8));
+                return null;
+            });
+
+            log.info("订单创建成功: orderNo={}, totalAmount={}", orderNo, orderInfo.getTotalAmount());
+
+        } catch (Exception e) {
+            log.error("创建订单异常: orderNo={}", orderNo, e);
+        }
+    }
+
+    /**
+     * 处理迟到订单（超时后库存结果才到达）
+     */
+    private void handleLateOrder(String orderNo, StockDeductMessage message,
+                                   String rollbackSentKey, String stockKey,
+                                   String deductingKey, String processingKey, String zsetKey) {
+        // 检查 deadline 任务是否已经发送过回滚消息
+        boolean hasRollbackSent = Boolean.TRUE.equals(redisTemplate.hasKey(rollbackSentKey));
+        if (!hasRollbackSent) {
+            // deadline 任务检查时库存还没扣，后来才扣的 → 由这里发送回滚
             com.flashsale.common.dto.StockRollbackMessage rollbackMessage =
                     new com.flashsale.common.dto.StockRollbackMessage();
-            rollbackMessage.setOrderNo(message.getOrderNo());
+            rollbackMessage.setOrderNo(orderNo);
             rollbackMessage.setActivityId(message.getActivityId());
             rollbackMessage.setItemId(message.getItemId());
             rollbackMessage.setQuantity(message.getQuantity());
             rollbackMessage.setUserId(message.getUserId());
-
             try {
+                localMessageService.saveMessage(orderNo, MqConstant.STOCK_ROLLBACK_TOPIC, rollbackMessage);
                 rocketMQTemplate.syncSend(MqConstant.STOCK_ROLLBACK_TOPIC, rollbackMessage);
-                log.info("因重复订单发送库存回滚消息: orderNo={}, existingOrderNo={}",
-                        message.getOrderNo(), existingOrderNo);
+                localMessageService.markMessageAsSent(orderNo);
             } catch (Exception e) {
-                log.error("发送库存回滚消息失败: orderNo={}", message.getOrderNo(), e);
+                log.error("迟到订单库存回滚消息发送失败，已保存到本地消息表等待重试: orderNo={}", orderNo, e);
             }
-
-            // 清理处理中标记
-            redisTemplate.delete("order:processing:" + message.getOrderNo());
-            redisTemplate.opsForZSet().remove("order:processing:zset", message.getOrderNo());
-
-            return;
+            // Pipeline：设置回滚已发送标记 + 清理
+            redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+                connection.stringCommands().set(rollbackSentKey.getBytes(StandardCharsets.UTF_8),
+                        "1".getBytes(StandardCharsets.UTF_8));
+                connection.keyCommands().expire(rollbackSentKey.getBytes(StandardCharsets.UTF_8), 86400);
+                connection.keyCommands().del(deductingKey.getBytes(StandardCharsets.UTF_8));
+                connection.keyCommands().del(processingKey.getBytes(StandardCharsets.UTF_8));
+                connection.zSetCommands().zRem(zsetKey.getBytes(StandardCharsets.UTF_8),
+                        orderNo.getBytes(StandardCharsets.UTF_8));
+                return null;
+            });
+            log.info("迟到订单库存回滚消息已发送: orderNo={}", orderNo);
+        } else {
+            // 回滚已由 deadline 任务发送，只做清理
+            redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+                connection.keyCommands().del(deductingKey.getBytes(StandardCharsets.UTF_8));
+                connection.keyCommands().del(processingKey.getBytes(StandardCharsets.UTF_8));
+                connection.zSetCommands().zRem(zsetKey.getBytes(StandardCharsets.UTF_8),
+                        orderNo.getBytes(StandardCharsets.UTF_8));
+                return null;
+            });
         }
+    }
 
-        // 1. 从活动服务获取商品信息
-        ActivityDto activityDto = null;
+    /**
+     * 处理重复订单（用户已有购买标记）
+     */
+    private void handleDuplicateOrder(String orderNo, StockDeductMessage message,
+                                        String existingOrderNo, String deadlineFailKey,
+                                        String processingKey, String zsetKey) {
+        // 发送库存回滚消息
+        com.flashsale.common.dto.StockRollbackMessage rollbackMessage =
+                new com.flashsale.common.dto.StockRollbackMessage();
+        rollbackMessage.setOrderNo(orderNo);
+        rollbackMessage.setActivityId(message.getActivityId());
+        rollbackMessage.setItemId(message.getItemId());
+        rollbackMessage.setQuantity(message.getQuantity());
+        rollbackMessage.setUserId(message.getUserId());
+
         try {
-            activityDto = activityFeignClient.getActivityDetail(message.getActivityId()).getData();
+            rocketMQTemplate.syncSend(MqConstant.STOCK_ROLLBACK_TOPIC, rollbackMessage);
+            log.info("因重复订单发送库存回滚消息: orderNo={}, existingOrderNo={}", orderNo, existingOrderNo);
         } catch (Exception e) {
-            log.error("获取活动信息失败: activityId={}", message.getActivityId(), e);
+            log.error("发送库存回滚消息失败: orderNo={}", orderNo, e);
         }
 
-        if (activityDto == null || activityDto.getItems() == null) {
-            log.error("活动信息不存在: activityId={}", message.getActivityId());
-            String failKey = "order:fail:" + message.getOrderNo();
-            redisTemplate.opsForValue().set(failKey, "活动信息不存在", 24, TimeUnit.HOURS);
-            // 清理处理中标记
-            redisTemplate.delete("order:processing:" + message.getOrderNo());
-            redisTemplate.opsForZSet().remove("order:processing:zset", message.getOrderNo());
-            // 清理扣减中标记（使用与 InventoryService 相同的 key 格式）
-            String deductingKey = "deducting:" + message.getUserId() + ":" + stockKey;
-            redisTemplate.delete(deductingKey);
-            return;
-        }
-
-        // 2. 查找对应的商品
-        ActivityItemDto targetItem = activityDto.getItems().stream()
-                .filter(item -> item.getItemId().equals(message.getItemId()))
-                .findFirst()
-                .orElse(null);
-
-        if (targetItem == null) {
-            log.error("商品不存在: itemId={}", message.getItemId());
-            String failKey = "order:fail:" + message.getOrderNo();
-            redisTemplate.opsForValue().set(failKey, "商品信息不存在", 24, TimeUnit.HOURS);
-            // 清理处理中标记
-            redisTemplate.delete("order:processing:" + message.getOrderNo());
-            redisTemplate.opsForZSet().remove("order:processing:zset", message.getOrderNo());
-            // 清理扣减中标记（使用与 InventoryService 相同的 key 格式）
-            String deductingKey = "deducting:" + message.getUserId() + ":" + stockKey;
-            redisTemplate.delete(deductingKey);
-            return;
-        }
-
-        // 3. 创建订单主表
-        OrderInfo orderInfo = new OrderInfo();
-        orderInfo.setOrderNo(message.getOrderNo());
-        orderInfo.setUserId(message.getUserId());
-        orderInfo.setActivityId(message.getActivityId());
-        orderInfo.setTotalAmount(targetItem.getSeckillPrice()
-                .multiply(java.math.BigDecimal.valueOf(message.getQuantity())));
-        orderInfo.setStatus(0); // 待支付
-        orderInfo.setCreateTime(LocalDateTime.now());
-
-        orderInfoMapper.insert(orderInfo);
-
-        // 4. 创建订单明细
-        OrderItem orderItem = new OrderItem();
-        orderItem.setOrderId(orderInfo.getId());
-        orderItem.setOrderNo(message.getOrderNo());
-        orderItem.setItemId(message.getItemId());
-        orderItem.setItemName(targetItem.getItemName());
-        orderItem.setItemImage(targetItem.getItemImage());
-        orderItem.setPrice(targetItem.getSeckillPrice());
-        orderItem.setQuantity(message.getQuantity());
-        orderItem.setTotalAmount(targetItem.getSeckillPrice()
-                .multiply(java.math.BigDecimal.valueOf(message.getQuantity())));
-        orderItem.setCreateTime(LocalDateTime.now());
-
-        orderItemMapper.insert(orderItem);
-
-        // 5. 设置订单超时取消（15分钟）
-        String orderKey = "order:timeout:" + message.getOrderNo();
-        redisTemplate.opsForValue().set(orderKey, orderInfo.getId(), 15, TimeUnit.MINUTES);
-
-        // 6. 标记用户已购买（防重复购买）
-        purchaseKey = "user:purchase:" + message.getUserId() + ":" + stockKey;
-        redisTemplate.opsForValue().set(purchaseKey, message.getOrderNo(), 24, TimeUnit.HOURS);
-        // 清理扣减中标记（使用与 InventoryService 相同的 key 格式）
-        String deductingKey = "deducting:" + message.getUserId() + ":" + stockKey;
-        redisTemplate.delete(deductingKey);
-        // 清理处理中标记
-        redisTemplate.delete("order:processing:" + message.getOrderNo());
-        redisTemplate.opsForZSet().remove("order:processing:zset", message.getOrderNo());
-
-        log.info("订单创建成功: orderNo={}, totalAmount={}", message.getOrderNo(), orderInfo.getTotalAmount());
+        // Pipeline：记录失败 + 清理
+        String failReason = "\"订单重复，您已有成功订单\"";
+        redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+            connection.stringCommands().set(deadlineFailKey.getBytes(StandardCharsets.UTF_8),
+                    failReason.getBytes(StandardCharsets.UTF_8));
+            connection.keyCommands().expire(deadlineFailKey.getBytes(StandardCharsets.UTF_8), 86400);
+            connection.keyCommands().del(processingKey.getBytes(StandardCharsets.UTF_8));
+            connection.zSetCommands().zRem(zsetKey.getBytes(StandardCharsets.UTF_8),
+                    orderNo.getBytes(StandardCharsets.UTF_8));
+            return null;
+        });
     }
 
     /**
@@ -529,55 +607,12 @@ public class OrderService {
     }
 
     /**
-     * 检查订单是否存在（内部接口）
-     *
-     * @param orderNo 订单号
-     * @return 订单是否存在
+     * 检查订单是否存在（内部使用）
      */
-    public boolean checkOrderExists(String orderNo) {
+    private boolean checkOrderExists(String orderNo) {
         LambdaQueryWrapper<OrderInfo> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(OrderInfo::getOrderNo, orderNo);
         return orderInfoMapper.selectCount(wrapper) > 0;
-    }
-
-    /**
-     * 检查用户对指定商品是否有成功的订单（排除指定订单号）
-     * 用于库存服务补偿回滚时判断用户是否已重试成功
-     *
-     * @param userId 用户ID
-     * @param activityId 活动ID
-     * @param itemId 商品ID
-     * @param excludeOrderNo 排除的订单号（当前检查的失败订单）
-     * @return 是否有成功订单
-     */
-    public boolean checkUserHasSuccessOrder(Long userId, Long activityId, Long itemId, String excludeOrderNo) {
-        // 查询该用户对指定商品的有效订单（排除当前失败订单）
-        // 只有待支付(0)和已支付(1)的订单才算成功订单
-        LambdaQueryWrapper<OrderInfo> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(OrderInfo::getUserId, userId)
-                .eq(OrderInfo::getActivityId, activityId)
-                .ne(OrderInfo::getOrderNo, excludeOrderNo) // 排除当前订单
-                .in(OrderInfo::getStatus, 0, 1); // 只查询待支付或已支付的订单
-
-        OrderInfo order = orderInfoMapper.selectOne(wrapper);
-
-        if (order == null) {
-            return false;
-        }
-
-        // 检查该订单是否包含指定商品
-        LambdaQueryWrapper<OrderItem> itemWrapper = new LambdaQueryWrapper<>();
-        itemWrapper.eq(OrderItem::getOrderNo, order.getOrderNo())
-                .eq(OrderItem::getItemId, itemId);
-
-        boolean hasItem = orderItemMapper.selectCount(itemWrapper) > 0;
-
-        if (hasItem) {
-            log.debug("用户有后续成功订单: userId={}, activityId={}, itemId={}, successOrderNo={}",
-                    userId, activityId, itemId, order.getOrderNo());
-        }
-
-        return hasItem;
     }
 
     /**
@@ -680,9 +715,48 @@ public class OrderService {
 
                     // 设置失败标记
                     redisTemplate.opsForValue().set(failKey, "订单创建超时，请重试", 24, TimeUnit.HOURS);
+
+                    // deadline模式：超时即死亡，检查库存是否已扣减后再决定是否回滚
+                    // d:inventory:{orderNo} 由 InventoryConsumer 在库存扣减成功后设置
+                    String deductedKey = "d:inventory:" + orderNo;
+                    String processingKeyLocal = "order:processing:" + orderNo;
+                    if (Boolean.TRUE.equals(redisTemplate.hasKey(deductedKey))) {
+                        // 库存已扣减 → 需要回滚
+                        Map<Object, Object> orderInfoData = redisTemplate.opsForHash().entries(processingKeyLocal);
+                        if (!orderInfoData.isEmpty()) {
+                            try {
+                                Long timeoutUserId = Long.valueOf(orderInfoData.get("userId").toString());
+                                Long timeoutActivityId = Long.valueOf(orderInfoData.get("activityId").toString());
+                                Long timeoutItemId = Long.valueOf(orderInfoData.get("itemId").toString());
+                                Integer timeoutQuantity = Integer.valueOf(orderInfoData.get("quantity").toString());
+
+                                StockRollbackMessage rollbackMessage = new StockRollbackMessage();
+                                rollbackMessage.setOrderNo(orderNo);
+                                rollbackMessage.setActivityId(timeoutActivityId);
+                                rollbackMessage.setItemId(timeoutItemId);
+                                rollbackMessage.setQuantity(timeoutQuantity);
+                                rollbackMessage.setUserId(timeoutUserId);
+
+                                localMessageService.saveMessage(orderNo, MqConstant.STOCK_ROLLBACK_TOPIC, rollbackMessage);
+                                rocketMQTemplate.syncSend(MqConstant.STOCK_ROLLBACK_TOPIC, rollbackMessage);
+                                localMessageService.markMessageAsSent(orderNo);
+                                // 设置回滚已发送标记，防止迟到消息重复回滚
+                                redisTemplate.opsForValue().set("stock:rollback:sent:" + orderNo, "1", 24, TimeUnit.HOURS);
+                                log.info("超时订单库存回滚消息已发送: orderNo={}", orderNo);
+                            } catch (Exception e) {
+                                log.error("超时订单库存回滚消息发送失败，已保存到本地消息表等待重试: orderNo={}", orderNo, e);
+                            }
+                        } else {
+                            log.warn("超时订单信息不完整，无法发送回滚消息: orderNo={}", orderNo);
+                        }
+                    } else {
+                        // 库存未扣减 → 只标记失败，不回滚（可能是MQ卡住或库存扣减失败）
+                        log.info("超时订单库存未扣减，仅标记失败不回滚: orderNo={}", orderNo);
+                    }
+
                     // 从 ZSET 中移除
                     redisTemplate.opsForZSet().remove("order:processing:zset", orderNo);
-                    redisTemplate.delete("order:processing:" + orderNo);
+                    redisTemplate.delete(processingKeyLocal);
 
                     markedCount++;
                     log.info("标记超时订单为失败: orderNo={}", orderNo);

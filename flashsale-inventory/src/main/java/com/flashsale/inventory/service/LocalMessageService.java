@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.flashsale.inventory.entity.LocalMessage;
 import com.flashsale.inventory.mapper.LocalMessageMapper;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,10 +13,15 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 
 /**
- * 本地消息服务
+ * 本地消息服务（Inventory 服务）
+ * 高并发场景下使用内存队列缓冲，定时批量刷入数据库
  */
 @Slf4j
 @Service
@@ -31,17 +37,27 @@ public class LocalMessageService {
     private ObjectMapper objectMapper;
 
     private static final int DEFAULT_MAX_RETRY = 5;
-    private static final int RETRY_INTERVAL_SECONDS = 30; // 重试间隔30秒
+    private static final int RETRY_INTERVAL_SECONDS = 30;
+
+    /** 内存缓冲队列，容量 10000 */
+    private static final int QUEUE_CAPACITY = 10000;
+    private final BlockingQueue<LocalMessage> messageQueue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
+
+    /** 跟踪已发送成功的消息，解决 buffer 与 markMessageAsSent 的 race condition */
+    private final ConcurrentHashMap<String, Boolean> sentFlags = new ConcurrentHashMap<>();
+
+    /** 批量写入大小 */
+    private static final int BATCH_SIZE = 500;
 
     /**
-     * 保存待发送消息
-     * 使用独立事务，确保消息记录不受外层业务事务回滚影响
+     * 保存待发送消息（缓冲模式）
+     * 消息先放入内存队列，由定时任务批量刷入数据库
+     * 队列满时降级为直接写库，保证消息不丢
      * @param businessNo 业务ID（订单号）
      * @param topic 消息主题
      * @param messageBody 消息内容
-     * @return 消息ID
+     * @return 消息ID（缓冲模式下返回 null）
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public Long saveMessage(String businessNo, String topic, Object messageBody) {
         try {
             String jsonBody = objectMapper.writeValueAsString(messageBody);
@@ -50,19 +66,91 @@ public class LocalMessageService {
             message.setBusinessNo(businessNo);
             message.setTopic(topic);
             message.setMessageBody(jsonBody);
-            message.setStatus(0); // 待发送
+            message.setStatus(0);
             message.setRetryCount(0);
             message.setMaxRetry(DEFAULT_MAX_RETRY);
-            message.setNextRetryTime(LocalDateTime.now()); // 立即发送
+            message.setNextRetryTime(LocalDateTime.now());
             message.setRemark("库存扣减结果消息");
 
-            localMessageMapper.insert(message);
-            log.info("保存本地消息成功: businessNo={}, topic={}, messageId={}", businessNo, topic, message.getId());
+            // 尝试放入队列，满时降级为直接写库
+            if (!messageQueue.offer(message)) {
+                log.warn("消息队列已满，降级为直接写库: businessNo={}", businessNo);
+                saveMessageDirect(message);
+            }
 
-            return message.getId();
+            return null;
         } catch (Exception e) {
             log.error("保存本地消息失败: businessNo={}", businessNo, e);
             throw new RuntimeException("保存本地消息失败", e);
+        }
+    }
+
+    /**
+     * 直接写库（降级模式）
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public void saveMessageDirect(LocalMessage message) {
+        localMessageMapper.insert(message);
+        log.info("直接写库保存本地消息成功: businessNo={}, topic={}, messageId={}",
+                message.getBusinessNo(), message.getTopic(), message.getId());
+    }
+
+    /**
+     * 批量刷入数据库
+     * 从队列中取出最多 BATCH_SIZE 条消息，一次性 INSERT
+     * flush 前检查 sentFlags，已发送成功的消息直接以 status=1 入库
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public void flushMessages() {
+        List<LocalMessage> batch = new ArrayList<>(BATCH_SIZE);
+        messageQueue.drainTo(batch, BATCH_SIZE);
+
+        if (batch.isEmpty()) {
+            return;
+        }
+
+        // 检查 sentFlags，将已发送的消息标记为 status=1
+        for (LocalMessage message : batch) {
+            if (sentFlags.remove(message.getBusinessNo()) != null) {
+                message.setStatus(1);
+                message.setRemark("发送成功");
+            }
+        }
+
+        try {
+            localMessageMapper.insertBatch(batch);
+            log.info("批量写入本地消息成功: batchSize={}", batch.size());
+        } catch (Exception e) {
+            log.error("批量写入本地消息失败，逐条降级写入: batchSize={}", batch.size(), e);
+            for (LocalMessage message : batch) {
+                try {
+                    localMessageMapper.insert(message);
+                } catch (Exception ex) {
+                    log.error("逐条写入也失败: businessNo={}", message.getBusinessNo(), ex);
+                }
+            }
+        }
+    }
+
+    /**
+     * 获取当前缓冲队列大小（用于监控）
+     */
+    public int getQueueSize() {
+        return messageQueue.size();
+    }
+
+    /**
+     * 应用关闭时刷入剩余消息，防止丢消息
+     */
+    @PreDestroy
+    public void shutdown() {
+        int remaining = messageQueue.size();
+        if (remaining > 0) {
+            log.info("应用关闭，刷入剩余缓冲消息: remaining={}", remaining);
+            while (!messageQueue.isEmpty()) {
+                flushMessages();
+            }
+            log.info("缓冲消息刷入完成");
         }
     }
 
@@ -73,32 +161,27 @@ public class LocalMessageService {
      */
     @Transactional(rollbackFor = Exception.class)
     public boolean trySendMessage(LocalMessage message) {
-        // 先 CAS 抢占状态：只有 status=0 的才能被更新为"发送中"(status=3)
-        // 使用当前 retryCount 作为版本校验，防止并发重复处理
         LambdaUpdateWrapper<LocalMessage> claimWrapper = new LambdaUpdateWrapper<>();
         claimWrapper.eq(LocalMessage::getId, message.getId())
-                .eq(LocalMessage::getStatus, 0) // 必须是待发送状态
-                .eq(LocalMessage::getRetryCount, message.getRetryCount()) // CAS 校验重试次数
-                .set(LocalMessage::getStatus, 3) // 发送中（临时状态）
+                .eq(LocalMessage::getStatus, 0)
+                .eq(LocalMessage::getRetryCount, message.getRetryCount())
+                .set(LocalMessage::getStatus, 3)
                 .set(LocalMessage::getRemark, "发送中");
 
         int claimed = localMessageMapper.update(null, claimWrapper);
         if (claimed == 0) {
-            // CAS 失败，说明其他实例正在处理或已处理
             log.debug("消息已被其他实例处理，跳过: messageId={}, businessNo={}",
                     message.getId(), message.getBusinessNo());
             return false;
         }
 
         try {
-            // 抢占成功，发送 MQ
             rocketMQTemplate.syncSend(message.getTopic(), message.getMessageBody());
 
-            // 发送成功，更新状态
             LambdaUpdateWrapper<LocalMessage> successWrapper = new LambdaUpdateWrapper<>();
             successWrapper.eq(LocalMessage::getId, message.getId())
-                    .eq(LocalMessage::getStatus, 3) // 必须是发送中状态
-                    .set(LocalMessage::getStatus, 1) // 已发送
+                    .eq(LocalMessage::getStatus, 3)
+                    .set(LocalMessage::getStatus, 1)
                     .set(LocalMessage::getRemark, "发送成功");
             localMessageMapper.update(null, successWrapper);
 
@@ -106,18 +189,16 @@ public class LocalMessageService {
             return true;
 
         } catch (Exception e) {
-            // 发送失败，恢复为待发送并增加重试次数
             LambdaUpdateWrapper<LocalMessage> failWrapper = new LambdaUpdateWrapper<>();
             failWrapper.eq(LocalMessage::getId, message.getId())
-                    .eq(LocalMessage::getStatus, 3) // 必须是发送中状态
-                    .set(LocalMessage::getStatus, 0) // 恢复为待发送
+                    .eq(LocalMessage::getStatus, 3)
+                    .set(LocalMessage::getStatus, 0)
                     .set(LocalMessage::getRetryCount, message.getRetryCount() + 1)
                     .set(LocalMessage::getNextRetryTime,
                             LocalDateTime.now().plusSeconds(RETRY_INTERVAL_SECONDS * (message.getRetryCount() + 1)));
 
-            // 超过最大重试次数，标记为失败
             if (message.getRetryCount() + 1 >= message.getMaxRetry()) {
-                failWrapper.set(LocalMessage::getStatus, 2) // 发送失败
+                failWrapper.set(LocalMessage::getStatus, 2)
                         .set(LocalMessage::getRemark, "超过最大重试次数: " + e.getMessage());
             }
             localMessageMapper.update(null, failWrapper);
@@ -155,16 +236,20 @@ public class LocalMessageService {
 
     /**
      * 根据业务号更新消息状态为已发送
-     * 使用独立事务，确保状态更新不受外层业务事务回滚影响
+     * 先尝试 DB UPDATE，如果消息还在缓冲队列中（未入库），则标记 sentFlags 供 flush 时使用
      * @param businessNo 业务ID（订单号）
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public void markMessageAsSent(String businessNo) {
         LambdaUpdateWrapper<LocalMessage> wrapper = new LambdaUpdateWrapper<>();
         wrapper.eq(LocalMessage::getBusinessNo, businessNo)
-                .eq(LocalMessage::getStatus, 0) // 只更新待发送的消息
-                .set(LocalMessage::getStatus, 1) // 已发送
+                .eq(LocalMessage::getStatus, 0)
+                .set(LocalMessage::getStatus, 1)
                 .set(LocalMessage::getRemark, "发送成功");
-        localMessageMapper.update(null, wrapper);
+        int affected = localMessageMapper.update(null, wrapper);
+        if (affected == 0) {
+            // 消息还在缓冲队列中未入库，标记 sentFlags 供 flush 时使用
+            sentFlags.put(businessNo, true);
+        }
     }
 }

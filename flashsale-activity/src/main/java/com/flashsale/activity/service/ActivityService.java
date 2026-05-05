@@ -26,7 +26,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -180,10 +183,23 @@ public class ActivityService {
                                 .eq(ActivityItem::getActivityId, activityId)
                 );
 
-                // 预热库存到Redis
+                // 预热库存到Redis（同时缓存商品元数据，避免秒杀时Feign调用）
                 for (ActivityItem item : items) {
                     String stockKey = RedisConstant.STOCK_CACHE_PREFIX + activityId + ":" + item.getItemId();
                     redisTemplate.opsForValue().set(stockKey, item.getStock());
+
+                    // 缓存商品元数据到Redis Hash，供订单服务直接读取
+                    String itemKey = "activity:item:" + activityId + ":" + item.getItemId();
+                    Map<String, String> itemMeta = new HashMap<>();
+                    itemMeta.put("itemId", String.valueOf(item.getItemId()));
+                    itemMeta.put("itemName", item.getItemName());
+                    itemMeta.put("itemImage", item.getItemImage());
+                    itemMeta.put("originalPrice", item.getOriginalPrice().toPlainString());
+                    itemMeta.put("seckillPrice", item.getSeckillPrice().toPlainString());
+                    itemMeta.put("limitPerUser", String.valueOf(item.getLimitPerUser()));
+                    itemMeta.put("stock", String.valueOf(item.getStock()));
+                    redisTemplate.opsForHash().putAll(itemKey, itemMeta);
+                    redisTemplate.expire(itemKey, 2, TimeUnit.HOURS);
 
                     log.info("库存预热: activityId={}, itemId={}, stock={}",
                             activityId, item.getItemId(), item.getStock());

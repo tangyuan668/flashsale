@@ -8,9 +8,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
 import org.apache.rocketmq.spring.core.RocketMQListener;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -37,35 +39,33 @@ public class InventoryConsumer implements RocketMQListener<String> {
 
     private static final String DEDUPE_KEY_PREFIX = "d:inventory:";
     private static final String DEDUPE_PROCESSING_PREFIX = "d:inventory:processing:";
-    private static final long DEDUPE_TIMEOUT_SECONDS = 1800; // 30分钟，覆盖 RocketMQ 最大重试间隔
+    private static final long DEDUPE_TIMEOUT_SECONDS = 1800;
 
     @Override
     public void onMessage(String message) {
-        log.info("========== InventoryConsumer 线程数=32 配置生效测试 ==========");
         String orderNo = null;
         try {
             log.info("库存服务接收到秒杀订单消息: {}", message);
 
-            // 解析消息
             OrderCreateMessage orderMessage = objectMapper.readValue(message, OrderCreateMessage.class);
             orderNo = orderMessage.getOrderNo();
 
-            // 1. 检查是否已成功处理过
             String successKey = DEDUPE_KEY_PREFIX + orderNo;
+            String processingKey = DEDUPE_PROCESSING_PREFIX + orderNo;
+
+            // 1. 去重检查（setIfAbsent 是原子操作，需保留串行语义）
             if (Boolean.TRUE.equals(redisTemplate.hasKey(successKey))) {
                 log.info("消息已处理成功，跳过: orderNo={}", orderNo);
                 return;
             }
 
-            // 2. 设置处理中标记（防止并发重复处理）
-            String processingKey = DEDUPE_PROCESSING_PREFIX + orderNo;
             Boolean isFirstTime = redisTemplate.opsForValue().setIfAbsent(processingKey, "1", DEDUPE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             if (Boolean.FALSE.equals(isFirstTime)) {
                 log.info("消息正在处理中，跳过: orderNo={}", orderNo);
                 return;
             }
 
-            // 构造库存扣减请求
+            // 2. 构造库存扣减请求
             StockDeductRequest deductRequest = new StockDeductRequest();
             deductRequest.setOrderNo(orderMessage.getOrderNo());
             deductRequest.setUserId(orderMessage.getUserId());
@@ -73,21 +73,23 @@ public class InventoryConsumer implements RocketMQListener<String> {
             deductRequest.setItemId(orderMessage.getItemId());
             deductRequest.setQuantity(orderMessage.getQuantity());
 
-            // 执行库存扣减（会自动发送结果消息到MQ）
+            // 3. 执行库存扣减
             inventoryService.deductStock(deductRequest);
 
-            // 处理成功，设置永久成功标记
-            redisTemplate.opsForValue().set(successKey, "1");
-            redisTemplate.delete(processingKey);
+            // 4. Pipeline：设置成功标记 + 清理处理中标记 → 1 次 RTT
+            redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+                connection.stringCommands().set(successKey.getBytes(StandardCharsets.UTF_8),
+                        "1".getBytes(StandardCharsets.UTF_8));
+                connection.keyCommands().del(processingKey.getBytes(StandardCharsets.UTF_8));
+                return null;
+            });
 
             log.info("库存扣减处理完成: orderNo={}", orderNo);
 
         } catch (Exception e) {
             log.error("处理库存扣减消息失败: orderNo={}, message={}", orderNo, message, e);
 
-            // 判断是否为可重试的错误
             if (isRetryableError(e)) {
-                // 可重试错误（临时故障）：删除处理中标记，允许立即重试
                 if (orderNo != null) {
                     String processingKey = DEDUPE_PROCESSING_PREFIX + orderNo;
                     redisTemplate.delete(processingKey);
@@ -95,38 +97,22 @@ public class InventoryConsumer implements RocketMQListener<String> {
                 }
                 throw new RuntimeException("处理失败（可重试），将重试", e);
             } else {
-                // 不可重试错误（业务失败）：保留处理中标记，等待30分钟过期或人工介入
                 log.warn("检测到不可重试错误，保留处理中标记，30分钟后将允许重试: orderNo={}", orderNo);
                 throw new RuntimeException("处理失败（不可重试）", e);
             }
         }
     }
 
-    /**
-     * 判断异常是否为可重试的临时故障
-     */
     private boolean isRetryableError(Exception e) {
-        if (e == null) {
-            return false;
-        }
-
-        String message = e.getMessage();
-        if (message == null) {
-            return false;
-        }
-
-        String lowerMessage = message.toLowerCase();
-
-        // 可重试的错误特征
-        return lowerMessage.contains("timeout")           // 超时
-                || lowerMessage.contains("timed out")     // 超时
-                || lowerMessage.contains("connection")    // 连接问题
-                || lowerMessage.contains("network")       // 网络问题
-                || lowerMessage.contains("refused")       // 连接拒绝
-                || lowerMessage.contains("reset")         // 连接重置
-                || lowerMessage.contains("interrupted")   // 中断
-                || e instanceof java.net.SocketException  // Socket 异常
-                || e instanceof java.net.ConnectException; // 连接异常
+        if (e == null) return false;
+        String msg = e.getMessage();
+        if (msg == null) return false;
+        String lower = msg.toLowerCase();
+        return lower.contains("timeout") || lower.contains("timed out")
+                || lower.contains("connection") || lower.contains("network")
+                || lower.contains("refused") || lower.contains("reset")
+                || lower.contains("interrupted")
+                || e instanceof java.net.SocketException
+                || e instanceof java.net.ConnectException;
     }
-
 }

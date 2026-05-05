@@ -83,29 +83,4 @@ public class OrderController {
         return Result.ok("取消成功", null);
     }
 
-    /**
-     * 内部接口：检查订单是否存在
-     * GET /order/internal/exists?orderNo=xxx
-     * 用于库存服务补偿回滚时检查订单状态
-     */
-    @GetMapping("/internal/exists")
-    public Result<Boolean> checkOrderExists(@RequestParam("orderNo") String orderNo) {
-        boolean exists = orderService.checkOrderExists(orderNo);
-        return Result.ok(exists);
-    }
-
-    /**
-     * 内部接口：检查用户对指定商品是否有成功的订单（排除指定订单号）
-     * GET /order/internal/hasSuccessOrder
-     * 用于库存服务补偿回滚时判断用户是否已重试成功
-     */
-    @GetMapping("/internal/hasSuccessOrder")
-    public Result<Boolean> checkUserHasSuccessOrder(
-            @RequestParam("userId") Long userId,
-            @RequestParam("activityId") Long activityId,
-            @RequestParam("itemId") Long itemId,
-            @RequestParam("excludeOrderNo") String excludeOrderNo) {
-        boolean hasSuccess = orderService.checkUserHasSuccessOrder(userId, activityId, itemId, excludeOrderNo);
-        return Result.ok(hasSuccess);
-    }
 }

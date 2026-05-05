@@ -28,4 +28,17 @@ public class MessageResendJob {
             log.error("消息重发定时任务执行失败", e);
         }
     }
+
+    /**
+     * 定时批量刷入缓冲消息
+     * 每200ms执行一次
+     */
+    @Scheduled(fixedRate = 200)
+    public void flushBufferedMessages() {
+        try {
+            localMessageService.flushMessages();
+        } catch (Exception e) {
+            log.error("消息缓冲刷入定时任务执行失败", e);
+        }
+    }
 }

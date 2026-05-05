@@ -1,5 +1,6 @@
 server:
   port: 8083
+  address: 127.0.0.1
 
 spring:
   application:
@@ -21,8 +22,8 @@ spring:
     username: root
     password: 123456
     hikari:
-      maximum-pool-size: 50
-      minimum-idle: 10
+      maximum-pool-size: 80
+      minimum-idle: 20
       connection-timeout: 10000
   # Redis
   data:
@@ -33,14 +34,15 @@ spring:
       timeout: 3000ms
       lettuce:
         pool:
-          max-active: 64
-          max-idle: 32
-          min-idle: 8
+          max-active: 16
+          max-idle: 64
+          min-idle: 16
 # MyBatis Plus
 mybatis-plus:
+  mapper-locations: classpath:mapper/*.xml
   configuration:
     map-underscore-to-camel-case: true
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    # log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
   global-config:
     db-config:
       id-type: auto

@@ -8,7 +8,10 @@ import com.flashsale.common.dto.StockDeductMessage;
 import com.flashsale.common.dto.StockDeductRequest;
 import com.flashsale.common.exception.BusinessException;
 import com.flashsale.inventory.entity.Inventory;
+import com.flashsale.inventory.service.LocalMessageService;
 import com.flashsale.inventory.entity.InventoryLog;
+import org.apache.rocketmq.client.producer.SendCallback;
+import org.apache.rocketmq.client.producer.SendResult;
 import com.flashsale.inventory.mapper.InventoryLogMapper;
 import com.flashsale.inventory.mapper.InventoryMapper;
 import com.flashsale.inventory.vo.InventoryInfoResponse;
@@ -26,9 +29,12 @@ import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Arrays;
+import jakarta.annotation.PreDestroy;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 
 /**
  * 库存服务
@@ -51,6 +57,11 @@ public class InventoryService {
 
     @Autowired
     private LocalMessageService localMessageService;
+
+    /** 库存日志缓冲队列 */
+    private static final int LOG_QUEUE_CAPACITY = 10000;
+    private static final int LOG_BATCH_SIZE = 500;
+    private final BlockingQueue<InventoryLog> logQueue = new LinkedBlockingQueue<>(LOG_QUEUE_CAPACITY);
 
     /**
      * Lua脚本：库存扣减（原子操作，防止超卖）
@@ -116,54 +127,6 @@ public class InventoryService {
             "    return stock + quantity\n" +
             "end\n" +
             "return -1";
-
-    /**
-     * Lua脚本：补偿回滚（用于消息消费失败等异常场景）
-     * 返回: 1-回滚成功
-     *
-     * 说明：
-     * - 补偿任务已根据日志时间（10分钟）判断是否需要补偿
-     * - 此脚本直接执行回滚，不再依赖扣减中标记的TTL
-     * - 清理扣减中标记和购买标记，恢复库存
-     */
-    private static final String COMPENSATE_ROLLBACK_LUA =
-            "local stockKey = KEYS[1]\n" +
-            "local deductingKey = KEYS[2]\n" +
-            "local purchaseKey = KEYS[3]\n" +
-            "local quantity = tonumber(ARGV[1])\n" +
-            "\n" +
-            "-- 执行回滚（原子操作）\n" +
-            "local stock = tonumber(redis.call('GET', stockKey))\n" +
-            "if stock ~= nil then\n" +
-            "    redis.call('INCRBY', stockKey, quantity)\n" + // 恢复库存
-            "end\n" +
-            "redis.call('DEL', deductingKey)\n" + // 删除扣减中标记（如果存在）
-            "redis.call('DEL', purchaseKey)\n" + // 删除购买标记（如果存在）
-            "\n" +
-            "return 1"; // 回滚成功
-
-    /**
-     * Lua脚本：仅回滚库存，保留购买标记
-     * 返回: 1-回滚成功
-     *
-     * 说明：
-     * - 用于用户已重试成功的场景，只回滚库存，不删除购买标记
-     * - 避免删除后续成功订单的购买标记，导致用户可以重复购买
-     */
-    private static final String COMPENSATE_ROLLBACK_STOCK_ONLY_LUA =
-            "local stockKey = KEYS[1]\n" +
-            "local deductingKey = KEYS[2]\n" +
-            "local quantity = tonumber(ARGV[1])\n" +
-            "\n" +
-            "-- 只恢复库存，不删除购买标记\n" +
-            "local stock = tonumber(redis.call('GET', stockKey))\n" +
-            "if stock ~= nil then\n" +
-            "    redis.call('INCRBY', stockKey, quantity)\n" + // 恢复库存
-            "end\n" +
-            "redis.call('DEL', deductingKey)\n" + // 删除扣减中标记（如果存在）
-            "-- 注意：不删除 purchaseKey\n" +
-            "\n" +
-            "return 1"; // 回滚成功
 
     /**
      * 获取库存信息
@@ -268,82 +231,7 @@ public class InventoryService {
     }
 
     /**
-     * 补偿回滚库存（用于处理消息消费失败等异常场景）
-     * 通过Lua脚本原子操作检查并回滚
-     *
-     * @param orderNo        订单号
-     * @param activityId     活动ID
-     * @param itemId         商品ID
-     * @param quantity       数量
-     * @param userId         用户ID
-     * @return 是否执行了补偿回滚
-     */
-    @Transactional(rollbackFor = Exception.class)
-    public boolean compensateRollback(String orderNo, Long activityId, Long itemId,
-                                       Integer quantity, Long userId) {
-        String stockKey = RedisConstant.STOCK_CACHE_PREFIX + activityId + ":" + itemId;
-        String deductingKey = "deducting:" + userId + ":" + stockKey;
-        String purchaseKey = "user:purchase:" + userId + ":" + stockKey;
-
-        // 执行补偿回滚（直接回滚，由补偿任务判断是否需要调用）
-        Long result = executeLua(COMPENSATE_ROLLBACK_LUA, Arrays.asList(stockKey, deductingKey, purchaseKey),
-                String.valueOf(quantity)
-        );
-
-        log.info("补偿回滚执行: orderNo={}, activityId={}, itemId={}, result={}",
-                orderNo, activityId, itemId, result);
-
-        if (result != null && result == 1) {
-            // 回滚成功，记录日志
-            recordInventoryLogForRollback(orderNo, activityId, itemId, quantity,
-                    0, quantity, userId); // 补偿场景无法获取准确的beforeStock
-            log.info("补偿回滚成功: orderNo={}", orderNo);
-            return true;
-        }
-
-        log.error("补偿回滚失败: orderNo={}, result={}", orderNo, result);
-        return false;
-    }
-
-    /**
-     * 补偿回滚库存（仅回滚库存，保留购买标记）
-     * 用于用户已重试成功的场景，避免删除后续订单的购买标记
-     *
-     * @param orderNo 订单号
-     * @param activityId 活动ID
-     * @param itemId 商品ID
-     * @param quantity 数量
-     * @param userId 用户ID
-     * @return 是否执行了补偿回滚
-     */
-    @Transactional(rollbackFor = Exception.class)
-    public boolean compensateRollbackOnlyStock(String orderNo, Long activityId, Long itemId,
-                                                Integer quantity, Long userId) {
-        String stockKey = RedisConstant.STOCK_CACHE_PREFIX + activityId + ":" + itemId;
-        String deductingKey = "deducting:" + userId + ":" + stockKey;
-
-        // 执行补偿回滚（只回滚库存，不删除购买标记）
-        Long result = executeLua(COMPENSATE_ROLLBACK_STOCK_ONLY_LUA, Arrays.asList(stockKey, deductingKey),
-                String.valueOf(quantity)
-        );
-
-        log.info("补偿回滚库存（保留购买标记）: orderNo={}, activityId={}, itemId={}, result={}",
-                orderNo, activityId, itemId, result);
-
-        if (result != null && result == 1) {
-            // 回滚成功，记录日志
-            recordInventoryLogForRollback(orderNo, activityId, itemId, quantity,
-                    0, quantity, userId);
-            log.info("补偿回滚成功（用户已重试）: orderNo={}", orderNo);
-            return true;
-        }
-
-        log.error("补偿回滚失败: orderNo={}, result={}", orderNo, result);
-        return false;
-    }
-
-    /**
-     * 记录库存回滚日志
+     * 记录库存回滚日志（缓冲模式）
      */
     private void recordInventoryLogForRollback(String orderNo, Long activityId, Long itemId,
                                                 Integer quantity, Integer beforeStock, Integer afterStock, Long userId) {
@@ -352,31 +240,73 @@ public class InventoryService {
         logEntry.setItemId(itemId);
         logEntry.setOrderNo(orderNo);
         logEntry.setUserId(userId);
-        logEntry.setChangeType(2); // 2-回滚
+        logEntry.setChangeType(2);
         logEntry.setChangeAmount(quantity);
         logEntry.setBeforeStock(beforeStock);
         logEntry.setAfterStock(afterStock);
         logEntry.setRemark("订单取消回滚，userId=" + userId);
 
-        inventoryLogMapper.insert(logEntry);
+        if (!logQueue.offer(logEntry)) {
+            log.warn("库存日志队列已满，降级为直接写库: orderNo={}", orderNo);
+            inventoryLogMapper.insert(logEntry);
+        }
     }
 
     /**
-     * 记录库存变动日志
+     * 记录库存变动日志（缓冲模式）
      */
     private void recordInventoryLog(StockDeductRequest request, Integer beforeStock, Integer afterStock, Integer changeType) {
-        InventoryLog log = new InventoryLog();
-        log.setActivityId(request.getActivityId());
-        log.setItemId(request.getItemId());
-        log.setOrderNo(request.getOrderNo());
-        log.setUserId(request.getUserId());
-        log.setChangeType(changeType);
-        log.setChangeAmount(request.getQuantity());
-        log.setBeforeStock(beforeStock);
-        log.setAfterStock(afterStock);
-        log.setRemark("库存扣减");
+        InventoryLog logEntry = new InventoryLog();
+        logEntry.setActivityId(request.getActivityId());
+        logEntry.setItemId(request.getItemId());
+        logEntry.setOrderNo(request.getOrderNo());
+        logEntry.setUserId(request.getUserId());
+        logEntry.setChangeType(changeType);
+        logEntry.setChangeAmount(request.getQuantity());
+        logEntry.setBeforeStock(beforeStock);
+        logEntry.setAfterStock(afterStock);
+        logEntry.setRemark("库存扣减");
 
-        inventoryLogMapper.insert(log);
+        if (!logQueue.offer(logEntry)) {
+            log.warn("库存日志队列已满，降级为直接写库: orderNo={}", request.getOrderNo());
+            inventoryLogMapper.insert(logEntry);
+        }
+    }
+
+    /**
+     * 批量刷入库存日志
+     */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public void flushInventoryLogs() {
+        List<InventoryLog> batch = new ArrayList<>(LOG_BATCH_SIZE);
+        logQueue.drainTo(batch, LOG_BATCH_SIZE);
+
+        if (batch.isEmpty()) {
+            return;
+        }
+
+        try {
+            for (InventoryLog logEntry : batch) {
+                inventoryLogMapper.insert(logEntry);
+            }
+            log.debug("批量写入库存日志成功: batchSize={}", batch.size());
+        } catch (Exception e) {
+            log.error("批量写入库存日志失败: batchSize={}", batch.size(), e);
+        }
+    }
+
+    /**
+     * 应用关闭时刷入剩余日志
+     */
+    @PreDestroy
+    public void shutdown() {
+        int remaining = logQueue.size();
+        if (remaining > 0) {
+            log.info("应用关闭，刷入剩余库存日志: remaining={}", remaining);
+            while (!logQueue.isEmpty()) {
+                flushInventoryLogs();
+            }
+        }
     }
 
     /**
@@ -397,15 +327,22 @@ public class InventoryService {
             // 保存到本地消息表
             localMessageService.saveMessage(request.getOrderNo(), MqConstant.STOCK_RESULT_TOPIC, message);
 
-            // 尝试发送（发送失败由定时任务重试）
+            // 异步发送（本地消息表已保证可靠性，无需同步等待 Broker ACK）
             try {
-                rocketMQTemplate.syncSend(MqConstant.STOCK_RESULT_TOPIC, message);
-                log.info("发送库存扣减消息成功: orderNo={}", request.getOrderNo());
-                // 立即更新本地消息表状态为已发送
-                localMessageService.markMessageAsSent(request.getOrderNo());
+                rocketMQTemplate.asyncSend(MqConstant.STOCK_RESULT_TOPIC, message, new SendCallback() {
+                    @Override
+                    public void onSuccess(SendResult result) {
+                        localMessageService.markMessageAsSent(request.getOrderNo());
+                        log.info("发送库存扣减消息成功: orderNo={}", request.getOrderNo());
+                    }
+
+                    @Override
+                    public void onException(Throwable e) {
+                        log.error("发送库存扣减消息失败，已保存到本地消息表等待重试: orderNo={}", request.getOrderNo(), e);
+                    }
+                });
             } catch (Exception e) {
                 log.error("发送库存扣减消息失败，已保存到本地消息表等待重试: orderNo={}", request.getOrderNo(), e);
-                // 消息已保存到本地消息表，定时任务会重试
             }
         } catch (Exception e) {
             log.error("构造库存扣减消息失败: orderNo={}", request.getOrderNo(), e);

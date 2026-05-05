@@ -28,4 +28,10 @@ public interface LocalMessageMapper extends BaseMapper<LocalMessage> {
             "ORDER BY id ASC " +
             "LIMIT #{limit}")
     List<LocalMessage> selectPendingMessages(@Param("now") LocalDateTime now, @Param("limit") int limit);
+
+    /**
+     * 批量插入消息
+     * @param messages 消息列表
+     */
+    void insertBatch(@Param("list") List<LocalMessage> messages);
 }

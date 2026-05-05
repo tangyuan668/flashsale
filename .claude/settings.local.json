@@ -27,7 +27,29 @@
       "Read(//f/develop_tools/apache-jmeter-5.6.3/apache-jmeter-5.6.3/**)",
       "mcp__zai-mcp-server__analyze_image",
       "Bash(grep -c \"sendDefaultImpl call timeout\\\\|syncSend failed\\\\|RemotingTooMuchRequestException\" \"F:/项目/毕设/flashsale/logs/\"*.log)",
-      "Bash(redis-cli SET *)"
+      "Bash(redis-cli SET *)",
+      "Bash(pip install *)",
+      "Bash(python3 *)",
+      "Bash(python *)",
+      "Bash(cmd *)",
+      "Bash(du *)",
+      "Bash(grep \"\\\\.sql$\")",
+      "Bash(grep *)",
+      "Read(//d//**)",
+      "Read(//f//**)",
+      "Read(//e//**)",
+      "Bash(wmic process *)",
+      "Bash(wmic logicaldisk *)",
+      "Read(//c/logs/**)",
+      "Read(//f/logs/**)",
+      "Bash(tasklist)",
+      "mcp__zread__search_doc",
+      "mcp__zread__read_file",
+      "mcp__web-reader__webReader",
+      "Bash(curl -s -H \"Accept: application/vnd.github.v3.raw\" \"https://api.github.com/repos/apache/rocketmq/contents/store/src/main/java/org/apache/rocketmq/store/DefaultMessageStore.java?ref=master\")",
+      "Bash(curl *)",
+      "Bash(redis-cli -h localhost -p 6379 EXISTS \"activity:item:1:1001\")",
+      "mcp__zai-mcp-server__analyze_data_visualization"
     ]
   }
 }
