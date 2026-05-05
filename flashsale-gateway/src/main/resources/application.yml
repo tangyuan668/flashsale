@@ -1,0 +1,68 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: flashsale-gateway
+  cloud:
+    nacos:
+      discovery:
+        server-addr: localhost:8848
+        namespace: flashsale
+        ip: 127.0.0.1
+      config:
+        server-addr: localhost:8848
+        namespace: flashsale
+        file-extension: yml
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true
+      routes:
+        # User服务路由
+        - id: flashsale-user
+          uri: lb://flashsale-user
+          predicates:
+            - Path=/api/user/**
+          filters:
+            - StripPrefix=1
+        # Activity服务路由
+        - id: flashsale-activity
+          uri: lb://flashsale-activity
+          predicates:
+            - Path=/api/activity/**
+          filters:
+            - StripPrefix=1
+        # Inventory服务路由
+        - id: flashsale-inventory
+          uri: lb://flashsale-inventory
+          predicates:
+            - Path=/api/inventory/**
+          filters:
+            - StripPrefix=1
+        # Order服务路由
+        - id: flashsale-order
+          uri: lb://flashsale-order
+          predicates:
+            - Path=/api/order/**
+          filters:
+            - StripPrefix=1
+  # Redis
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 0
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 64
+          min-idle: 16
+
+# Logging
+logging:
+  level:
+    com.flashsale: debug
+    org.springframework.cloud.gateway: debug

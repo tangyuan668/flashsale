@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.flashsale.order.mapper.LocalMessageMapper">
+
+    <insert id="insertBatch">
+        INSERT INTO local_message (business_no, topic, message_body, status, retry_count, max_retry, next_retry_time, remark)
+        VALUES
+        <foreach collection="list" item="msg" separator=",">
+            (#{msg.businessNo}, #{msg.topic}, #{msg.messageBody}, #{msg.status}, #{msg.retryCount}, #{msg.maxRetry}, #{msg.nextRetryTime}, #{msg.remark})
+        </foreach>
+    </insert>
+
+</mapper>
