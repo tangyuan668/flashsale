@@ -72,6 +72,16 @@ public class OrderController {
     }
 
     /**
+     * 获取所有订单列表（管理员）
+     * GET /api/order/all
+     */
+    @GetMapping("/all")
+    public Result<List<OrderDetailResponse>> getAllOrders() {
+        List<OrderDetailResponse> list = orderService.getAllOrders();
+        return Result.ok(list);
+    }
+
+    /**
      * 取消订单
      * POST /api/order/{orderNo}/cancel
      */

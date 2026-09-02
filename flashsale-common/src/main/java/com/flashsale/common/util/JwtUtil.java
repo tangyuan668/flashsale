@@ -31,10 +31,11 @@ public class JwtUtil {
      * @param phone  手机号
      * @return Token
      */
-    public String generateToken(Long userId, String phone) {
+    public String generateToken(Long userId, String phone, Integer role) {
         Map<String, Object> claims = new HashMap<>();
         claims.put(JwtConstant.USER_ID_KEY, userId);
         claims.put(JwtConstant.PHONE_KEY, phone);
+        claims.put("role", role);
         return createToken(claims);
     }
 

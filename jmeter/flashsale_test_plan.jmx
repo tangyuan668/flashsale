@@ -14,95 +14,69 @@
           </elementProp>
           <elementProp name="ACTIVITY_ID" elementType="Argument">
             <stringProp name="Argument.name">ACTIVITY_ID</stringProp>
-            <stringProp name="Argument.value">1</stringProp>
+            <stringProp name="Argument.value">10</stringProp>
           </elementProp>
           <elementProp name="ITEM_ID" elementType="Argument">
             <stringProp name="Argument.name">ITEM_ID</stringProp>
-            <stringProp name="Argument.value">1001</stringProp>
+            <stringProp name="Argument.value">21</stringProp>
           </elementProp>
         </collectionProp>
       </elementProp>
-      <stringProp name="TestPlan.comments">FlashSale 秒杀系统 JMeter 压力测试计划&#xa;&#xa;包含三个测试场景：&#xa;0-前置：批量用户登录获取Token&#xa;1-秒杀核心场景：200并发抢购100件商品&#xa;2-混合负载场景：浏览+抢购混合&#xa;3-稳定性场景：持续10分钟低负载&#xa;&#xa;前提条件：&#xa;- 所有微服务已启动（gateway:8080, user:8081, activity:8082, inventory:8083, order:8084）&#xa;- Nacos、Redis、RocketMQ、MySQL 已就绪&#xa;- 已执行 sql/flashsale_all.sql 初始化数据&#xa;- 已通过活动管理接口将活动状态改为进行中并预热库存到 Redis</stringProp>
+      <stringProp name="TestPlan.comments">FlashSale 秒杀系统 JMeter 压力测试计划
+
+包含三个测试场景：
+0-前置：批量用户登录获取Token
+1-秒杀核心场景：1000并发抢购500件商品
+2-混合负载场景：浏览+抢购混合
+3-稳定性场景：持续10分钟低负载
+
+前提条件：
+- 所有微服务已启动（gateway:8080, user:8081, activity:8082, inventory:8083, order:8084）
+- Nacos、Redis、RocketMQ、MySQL 已就绪
+- 已执行 sql/flashsale_all.sql 初始化数据
+- 已通过活动管理接口将活动状态改为进行中并预热库存到 Redis</stringProp>
     </TestPlan>
     <hashTree>
-
-      <!-- ==================== 0-前置：批量用户登录 ==================== -->
       <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="0-前置：批量用户登录获取Token">
-        <intProp name="ThreadGroup.num_threads">500</intProp>
+        <intProp name="ThreadGroup.num_threads">1000</intProp>
         <intProp name="ThreadGroup.ramp_time">10</intProp>
-        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+        <boolProp name="ThreadGroup.same_user_on_next_iteration">true</boolProp>
         <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
         <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="循环控制器">
-          <boolProp name="LoopController.continue_forever">false</boolProp>
           <stringProp name="LoopController.loops">1</stringProp>
+          <boolProp name="LoopController.continue_forever">false</boolProp>
         </elementProp>
       </ThreadGroup>
       <hashTree>
-        <CounterConfig guiclass="CounterConfigGui" testclass="CounterConfig" testname="用户编号计数器">
+        <CounterConfig guiclass="CounterConfigGui" testclass="CounterConfig" testname="用户编号计数器" enabled="true">
           <stringProp name="CounterConfig.start">1</stringProp>
-          <stringProp name="CounterConfig.end">500</stringProp>
+          <stringProp name="CounterConfig.end">1000</stringProp>
           <stringProp name="CounterConfig.incr">1</stringProp>
-          <stringProp name="CounterConfig.format">000</stringProp>
+          <stringProp name="CounterConfig.format">0000</stringProp>
           <stringProp name="CounterConfig.name">user_index</stringProp>
           <boolProp name="CounterConfig.per_user">false</boolProp>
         </CounterConfig>
         <hashTree/>
-
-        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="用户注册">
-          <boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
-          <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
-            <collectionProp name="Arguments.arguments">
-              <elementProp name="" elementType="HTTPArgument">
-                <boolProp name="HTTPArgument.always_encode">false</boolProp>
-                <stringProp name="Argument.value">{&quot;phone&quot;:&quot;139000${user_index}00&quot;,&quot;password&quot;:&quot;123456&quot;,&quot;nickname&quot;:&quot;测试用户${user_index}&quot;}</stringProp>
-                <stringProp name="Argument.metadata">=</stringProp>
-              </elementProp>
-            </collectionProp>
-          </elementProp>
-          <stringProp name="HTTPSampler.domain"></stringProp>
-          <stringProp name="HTTPSampler.port"></stringProp>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="用户注册" enabled="true">
           <stringProp name="HTTPSampler.protocol">http</stringProp>
           <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
           <stringProp name="HTTPSampler.path">${BASE_URL}/api/user/register</stringProp>
-          <stringProp name="HTTPSampler.method">POST</stringProp>
           <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
-          <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
+          <stringProp name="HTTPSampler.method">POST</stringProp>
           <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
-        </HTTPSamplerProxy>
-        <hashTree>
-          <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="HTTP Header">
-            <collectionProp name="HeaderManager.headers">
-              <elementProp name="" elementType="Header">
-                <stringProp name="Header.name">Content-Type</stringProp>
-                <stringProp name="Header.value">application/json</stringProp>
-              </elementProp>
-            </collectionProp>
-          </HeaderManager>
-        </hashTree>
-
-        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="用户登录">
           <boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
           <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
             <collectionProp name="Arguments.arguments">
               <elementProp name="" elementType="HTTPArgument">
                 <boolProp name="HTTPArgument.always_encode">false</boolProp>
-                <stringProp name="Argument.value">{&quot;phone&quot;:&quot;139000${user_index}00&quot;,&quot;password&quot;:&quot;123456&quot;}</stringProp>
+                <stringProp name="Argument.value">{&quot;phone&quot;:&quot;1390001${user_index}&quot;,&quot;password&quot;:&quot;123456&quot;,&quot;nickname&quot;:&quot;测试用户${user_index}&quot;}</stringProp>
                 <stringProp name="Argument.metadata">=</stringProp>
               </elementProp>
             </collectionProp>
           </elementProp>
-          <stringProp name="HTTPSampler.domain"></stringProp>
-          <stringProp name="HTTPSampler.port"></stringProp>
-          <stringProp name="HTTPSampler.protocol">http</stringProp>
-          <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
-          <stringProp name="HTTPSampler.path">${BASE_URL}/api/user/login</stringProp>
-          <stringProp name="HTTPSampler.method">POST</stringProp>
-          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
-          <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
-          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
         </HTTPSamplerProxy>
         <hashTree>
-          <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="HTTP Header">
+          <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="HTTP Header" enabled="true">
             <collectionProp name="HeaderManager.headers">
               <elementProp name="" elementType="Header">
                 <stringProp name="Header.name">Content-Type</stringProp>
@@ -111,45 +85,94 @@
             </collectionProp>
           </HeaderManager>
           <hashTree/>
-          <JSONPostProcessor guiclass="JSONPostProcessorGui" testclass="JSONPostProcessor" testname="提取Token和UserId">
+        </hashTree>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="用户登录" enabled="true">
+          <stringProp name="HTTPSampler.protocol">http</stringProp>
+          <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
+          <stringProp name="HTTPSampler.path">${BASE_URL}/api/user/login</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <stringProp name="HTTPSampler.method">POST</stringProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+            <collectionProp name="Arguments.arguments">
+              <elementProp name="" elementType="HTTPArgument">
+                <boolProp name="HTTPArgument.always_encode">false</boolProp>
+                <stringProp name="Argument.value">{&quot;phone&quot;:&quot;1390001${user_index}&quot;,&quot;password&quot;:&quot;123456&quot;}</stringProp>
+                <stringProp name="Argument.metadata">=</stringProp>
+              </elementProp>
+            </collectionProp>
+          </elementProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="HTTP Header" enabled="true">
+            <collectionProp name="HeaderManager.headers">
+              <elementProp name="" elementType="Header">
+                <stringProp name="Header.name">Content-Type</stringProp>
+                <stringProp name="Header.value">application/json</stringProp>
+              </elementProp>
+            </collectionProp>
+          </HeaderManager>
+          <hashTree/>
+          <JSONPostProcessor guiclass="JSONPostProcessorGui" testclass="JSONPostProcessor" testname="提取Token和UserId" enabled="true">
             <stringProp name="JSONPostProcessor.referenceNames">token,userId</stringProp>
             <stringProp name="JSONPostProcessor.jsonPathExprs">$.data.token,$.data.userId</stringProp>
             <stringProp name="JSONPostProcessor.match_numbers">1</stringProp>
-            <boolProp name="JSONPostProcessor.compute_concat">false</boolProp>
           </JSONPostProcessor>
           <hashTree/>
-          <JSR223PostProcessor guiclass="TestBeanGUI" testclass="JSR223PostProcessor" testname="保存Token到文件">
+          <JSR223PostProcessor guiclass="TestBeanGUI" testclass="JSR223PostProcessor" testname="保存Token到文件" enabled="true">
             <stringProp name="scriptLanguage">groovy</stringProp>
             <stringProp name="parameters"></stringProp>
             <boolProp name="resetInterpreter">false</boolProp>
-            <stringProp name="script">def token = vars.get(&quot;token&quot;)
-def userId = vars.get(&quot;userId&quot;)
+            <stringProp name="script">import groovy.json.JsonSlurper
+
 def userIndex = vars.get(&quot;user_index&quot;)
-def dir = new File(org.apache.jmeter.services.FileServer.getFileServer().getBaseDir(), &quot;tokens&quot;)
-dir.mkdirs()
-def fileIndex = Integer.parseInt(userIndex)
-def file = new File(dir, &quot;user_${fileIndex}.csv&quot;)
-file.text = token + &quot;,&quot; + userId
-log.info(&quot;Token saved: user_${fileIndex}.csv, token length=&quot; + (token != null ? token.length() : &quot;null&quot;))</stringProp>
+def response = prev.getResponseDataAsString()
+def code = prev.getResponseCode()
+
+def json = new JsonSlurper().parseText(response)
+def token = json.data?.token
+def userId = json.data?.userId
+
+log.info(&quot;[SaveToken] user_index=&quot; + userIndex + &quot;, code=&quot; + code + &quot;, token=&quot; + (token != null ? token.substring(0, Math.min(20, token.length())) + &quot;...&quot; : &quot;NULL&quot;))
+
+if (token != null &amp;&amp; token.length() &gt; 0) {
+    def dir = new File(&quot;tokens&quot;)
+    dir.mkdirs()
+    def fileIndex = Integer.parseInt(userIndex)
+    def file = new File(dir, &quot;user_${fileIndex}.csv&quot;)
+    file.text = token + &quot;,&quot; + userId
+    vars.put(&quot;token&quot;, token)
+    vars.put(&quot;userId&quot;, userId.toString())
+    log.info(&quot;[SaveToken] SUCCESS: user_${fileIndex}.csv saved&quot;)
+} else {
+    log.warn(&quot;[SaveToken] FAIL: token is null for user_&quot; + userIndex + &quot;, response=&quot; + response.substring(0, Math.min(200, response.length())))
+}</stringProp>
+            <stringProp name="filename"></stringProp>
+            <stringProp name="cacheKey">false</stringProp>
           </JSR223PostProcessor>
           <hashTree/>
         </hashTree>
       </hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="场景1：秒杀核心场景（1000并发抢购500件商品）">
+        <stringProp name="TestPlan.comments">模拟1000个用户同时抢购500件商品
 
-      <!-- ==================== 场景1：秒杀核心场景 ==================== -->
-      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="场景1：秒杀核心场景（500并发抢购100件商品）">
-        <intProp name="ThreadGroup.num_threads">500</intProp>
-        <intProp name="ThreadGroup.ramp_time">2</intProp>
-        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+预期结果：
+- 成功订单数 = 库存数（100）
+- 无超卖（成功订单 &lt;= 库存数）
+- 无重复订单
+- 观察TPS和P99延迟</stringProp>
+        <intProp name="ThreadGroup.num_threads">1000</intProp>
+        <intProp name="ThreadGroup.ramp_time">1</intProp>
+        <boolProp name="ThreadGroup.same_user_on_next_iteration">true</boolProp>
         <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
         <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="循环控制器">
+          <stringProp name="LoopController.loops">1</stringProp>
           <boolProp name="LoopController.continue_forever">false</boolProp>
-          <intProp name="LoopController.loops">1</intProp>
         </elementProp>
-        <stringProp name="TestPlan.comments">模拟500个用户同时抢购100件商品&#xa;&#xa;预期结果：&#xa;- 成功订单数 = 库存数（100）&#xa;- 无超卖（成功订单 &lt;= 库存数）&#xa;- 无重复订单&#xa;- 观察TPS和P99延迟</stringProp>
       </ThreadGroup>
       <hashTree>
-        <CSVDataSet guiclass="TestBeanGUI" testclass="CSVDataSet" testname="读取用户Token">
+        <CSVDataSet guiclass="TestBeanGUI" testclass="CSVDataSet" testname="读取用户Token" enabled="true">
           <stringProp name="delimiter">,</stringProp>
           <stringProp name="fileEncoding">UTF-8</stringProp>
           <stringProp name="filename">tokens/user_${__threadNum}.csv</stringProp>
@@ -159,10 +182,16 @@ log.info(&quot;Token saved: user_${fileIndex}.csv, token length=&quot; + (token 
           <boolProp name="stopThread">false</boolProp>
           <stringProp name="variableNames">token,userId</stringProp>
           <stringProp name="shareMode.mode">shareMode.all</stringProp>
+          <stringProp name="shareMode">shareMode.all</stringProp>
         </CSVDataSet>
         <hashTree/>
-
-        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="秒杀下单">
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="秒杀下单" enabled="true">
+          <stringProp name="HTTPSampler.protocol">http</stringProp>
+          <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
+          <stringProp name="HTTPSampler.path">${BASE_URL}/api/order/create</stringProp>
+          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+          <stringProp name="HTTPSampler.method">POST</stringProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
           <boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
           <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
             <collectionProp name="Arguments.arguments">
@@ -173,18 +202,9 @@ log.info(&quot;Token saved: user_${fileIndex}.csv, token length=&quot; + (token 
               </elementProp>
             </collectionProp>
           </elementProp>
-          <stringProp name="HTTPSampler.domain"></stringProp>
-          <stringProp name="HTTPSampler.port"></stringProp>
-          <stringProp name="HTTPSampler.protocol">http</stringProp>
-          <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
-          <stringProp name="HTTPSampler.path">${BASE_URL}/api/order/create</stringProp>
-          <stringProp name="HTTPSampler.method">POST</stringProp>
-          <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
-          <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
-          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
         </HTTPSamplerProxy>
         <hashTree>
-          <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="HTTP Header">
+          <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="HTTP Header" enabled="true">
             <collectionProp name="HeaderManager.headers">
               <elementProp name="" elementType="Header">
                 <stringProp name="Header.name">Authorization</stringProp>
@@ -197,60 +217,61 @@ log.info(&quot;Token saved: user_${fileIndex}.csv, token length=&quot; + (token 
             </collectionProp>
           </HeaderManager>
           <hashTree/>
-          <JSONPostProcessor guiclass="JSONPostProcessorGui" testclass="JSONPostProcessor" testname="提取订单号">
+          <JSONPostProcessor guiclass="JSONPostProcessorGui" testclass="JSONPostProcessor" testname="提取订单号" enabled="true">
             <stringProp name="JSONPostProcessor.referenceNames">orderNo,seckillSuccess,seckillMessage</stringProp>
             <stringProp name="JSONPostProcessor.jsonPathExprs">$.data.orderNo,$.data.success,$.message</stringProp>
             <stringProp name="JSONPostProcessor.match_numbers">1</stringProp>
-            <boolProp name="JSONPostProcessor.compute_concat">false</boolProp>
           </JSONPostProcessor>
           <hashTree/>
-          <JSR223PostProcessor guiclass="TestBeanGUI" testclass="JSR223PostProcessor" testname="记录成功订单">
+          <JSR223PostProcessor guiclass="TestBeanGUI" testclass="JSR223PostProcessor" testname="记录成功订单" enabled="true">
             <stringProp name="scriptLanguage">groovy</stringProp>
             <stringProp name="parameters"></stringProp>
             <boolProp name="resetInterpreter">false</boolProp>
-            <stringProp name="script">def orderNo = vars.get(&quot;orderNo&quot;)
+            <stringProp name="script">import groovy.json.JsonSlurper
+
 def code = prev.getResponseCode()
 def body = prev.getResponseDataAsString()
+def json = new JsonSlurper().parseText(body)
+def orderNo = json.data?.orderNo
 
 if (orderNo != null &amp;&amp; !orderNo.equals(&quot;&quot;) &amp;&amp; !orderNo.equals(&quot;null&quot;)) {
+    vars.put(&quot;orderNo&quot;, orderNo)
+    def userId = vars.get(&quot;userId&quot;)
     def file = new File(&quot;success_orders.csv&quot;)
     if (!file.exists()) {
         file.append(&quot;userId,orderNo,responseCode,timestamp\n&quot;)
     }
-    file.append(&quot;${userId},${orderNo},${code},${System.currentTimeMillis()}\n&quot;)
+    file.append(userId + &quot;,&quot; + orderNo + &quot;,&quot; + code + &quot;,&quot; + System.currentTimeMillis() + &quot;\n&quot;)
 }</stringProp>
+            <stringProp name="filename"></stringProp>
+            <stringProp name="cacheKey">false</stringProp>
           </JSR223PostProcessor>
           <hashTree/>
         </hashTree>
-
-        <UniformRandomTimer guiclass="UniformRandomTimerGui" testclass="UniformRandomTimer" testname="等待1秒后查询">
+        <UniformRandomTimer guiclass="UniformRandomTimerGui" testclass="UniformRandomTimer" testname="等待1秒后查询" enabled="true">
           <stringProp name="ConstantTimer.delay">1000</stringProp>
           <stringProp name="RandomTimer.range">100</stringProp>
         </UniformRandomTimer>
         <hashTree/>
-
-        <!-- 轮询订单状态 -->
-        <LoopController guiclass="LoopControlPanel" testclass="LoopController" testname="轮询订单状态（最多6次）">
+        <LoopController guiclass="LoopControlPanel" testclass="LoopController" testname="轮询订单状态（最多6次）" enabled="true">
           <boolProp name="LoopController.continue_forever">false</boolProp>
           <stringProp name="LoopController.loops">6</stringProp>
         </LoopController>
         <hashTree>
-          <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="查询订单状态">
-            <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
-              <collectionProp name="Arguments.arguments"/>
-            </elementProp>
-            <stringProp name="HTTPSampler.domain"></stringProp>
-            <stringProp name="HTTPSampler.port"></stringProp>
+          <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="查询订单状态" enabled="true">
             <stringProp name="HTTPSampler.protocol">http</stringProp>
             <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
             <stringProp name="HTTPSampler.path">${BASE_URL}/api/order/${orderNo}/status</stringProp>
-            <stringProp name="HTTPSampler.method">GET</stringProp>
             <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
-            <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
+            <stringProp name="HTTPSampler.method">GET</stringProp>
             <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+            <boolProp name="HTTPSampler.postBodyRaw">false</boolProp>
+            <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="User Defined Variables">
+              <collectionProp name="Arguments.arguments"/>
+            </elementProp>
           </HTTPSamplerProxy>
           <hashTree>
-            <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="HTTP Header">
+            <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="HTTP Header" enabled="true">
               <collectionProp name="HeaderManager.headers">
                 <elementProp name="" elementType="Header">
                   <stringProp name="Header.name">Authorization</stringProp>
@@ -259,99 +280,117 @@ if (orderNo != null &amp;&amp; !orderNo.equals(&quot;&quot;) &amp;&amp; !orderNo
               </collectionProp>
             </HeaderManager>
             <hashTree/>
-            <JSONPostProcessor guiclass="JSONPostProcessorGui" testclass="JSONPostProcessor" testname="提取订单状态">
+            <JSONPostProcessor guiclass="JSONPostProcessorGui" testclass="JSONPostProcessor" testname="提取订单状态" enabled="true">
               <stringProp name="JSONPostProcessor.referenceNames">orderStatus</stringProp>
               <stringProp name="JSONPostProcessor.jsonPathExprs">$.data.status</stringProp>
               <stringProp name="JSONPostProcessor.match_numbers">1</stringProp>
-              <boolProp name="JSONPostProcessor.compute_concat">false</boolProp>
             </JSONPostProcessor>
             <hashTree/>
-            <IfController guiclass="IfControllerPanel" testclass="IfController" testname="订单已出结果则停止轮询">
+            <IfController guiclass="IfControllerPanel" testclass="IfController" testname="订单已出结果则停止轮询" enabled="true">
               <stringProp name="IfController.condition">&quot;${orderStatus}&quot; != &quot;&quot; &amp;&amp; &quot;${orderStatus}&quot; != &quot;null&quot;</stringProp>
+              <boolProp name="IfController.evaluateAll">false</boolProp>
+              <boolProp name="IfController.useExpression">false</boolProp>
             </IfController>
             <hashTree>
-              <TestAction guiclass="TestActionGui" testclass="TestAction" testname="停止循环">
+              <TestAction guiclass="TestActionGui" testclass="TestAction" testname="停止循环" enabled="true">
                 <intProp name="TestAction.target">0</intProp>
                 <intProp name="TestAction.action">1</intProp>
+                <intProp name="ActionProcessor.action">0</intProp>
+                <intProp name="ActionProcessor.target">0</intProp>
+                <stringProp name="ActionProcessor.duration"></stringProp>
               </TestAction>
               <hashTree/>
             </hashTree>
           </hashTree>
-          <UniformRandomTimer guiclass="UniformRandomTimerGui" testclass="UniformRandomTimer" testname="轮询间隔3秒">
+          <UniformRandomTimer guiclass="UniformRandomTimerGui" testclass="UniformRandomTimer" testname="轮询间隔3秒" enabled="true">
             <stringProp name="ConstantTimer.delay">3000</stringProp>
             <stringProp name="RandomTimer.range">500</stringProp>
           </UniformRandomTimer>
           <hashTree/>
         </hashTree>
       </hashTree>
-
-      <!-- ==================== 场景2：混合负载场景 ==================== -->
-      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="场景2：混合负载场景（浏览+抢购）">
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="场景2：混合负载场景（浏览+抢购）" enabled="true">
+        <stringProp name="TestPlan.comments">模拟真实场景：用户先浏览活动列表，再查看商品详情，然后抢购
+比例：浏览60% / 详情20% / 抢购20%
+每个用户循环5次</stringProp>
         <intProp name="ThreadGroup.num_threads">100</intProp>
         <intProp name="ThreadGroup.ramp_time">10</intProp>
-        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+        <boolProp name="ThreadGroup.same_user_on_next_iteration">true</boolProp>
         <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
         <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="循环控制器">
-          <boolProp name="LoopController.continue_forever">false</boolProp>
           <stringProp name="LoopController.loops">5</stringProp>
+          <boolProp name="LoopController.continue_forever">false</boolProp>
         </elementProp>
-        <stringProp name="TestPlan.comments">模拟真实场景：用户先浏览活动列表，再查看商品详情，然后抢购&#xa;比例：浏览60% / 详情20% / 抢购20%&#xa;每个用户循环5次</stringProp>
       </ThreadGroup>
       <hashTree>
-        <CSVDataSet guiclass="TestBeanGUI" testclass="CSVDataSet" testname="读取用户Token">
+        <CSVDataSet guiclass="TestBeanGUI" testclass="CSVDataSet" testname="读取用户Token" enabled="true">
           <stringProp name="delimiter">,</stringProp>
           <stringProp name="fileEncoding">UTF-8</stringProp>
-          <stringProp name="filename">tokens/user_${__threadNum % 500 + 1}.csv</stringProp>
+          <stringProp name="filename">tokens/user_${__threadNum % 1000 + 1}.csv</stringProp>
           <boolProp name="ignoreFirstLine">false</boolProp>
           <boolProp name="quotedData">false</boolProp>
           <boolProp name="recycle">true</boolProp>
           <boolProp name="stopThread">false</boolProp>
           <stringProp name="variableNames">token,userId</stringProp>
           <stringProp name="shareMode.mode">shareMode.all</stringProp>
+          <stringProp name="shareMode">shareMode.all</stringProp>
         </CSVDataSet>
         <hashTree/>
-
-        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="浏览活动列表">
-          <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
-            <collectionProp name="Arguments.arguments"/>
-          </elementProp>
-          <stringProp name="HTTPSampler.domain"></stringProp>
-          <stringProp name="HTTPSampler.port"></stringProp>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="浏览活动列表" enabled="true">
           <stringProp name="HTTPSampler.protocol">http</stringProp>
           <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
           <stringProp name="HTTPSampler.path">${BASE_URL}/api/activity/list</stringProp>
-          <stringProp name="HTTPSampler.method">GET</stringProp>
           <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
-          <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
+          <stringProp name="HTTPSampler.method">GET</stringProp>
           <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <boolProp name="HTTPSampler.postBodyRaw">false</boolProp>
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="User Defined Variables">
+            <collectionProp name="Arguments.arguments"/>
+          </elementProp>
         </HTTPSamplerProxy>
         <hashTree>
-          <ThroughputController guiclass="ThroughputControllerGui" testclass="ThroughputController" testname="20%用户查看详情">
+          <ThroughputController guiclass="ThroughputControllerGui" testclass="ThroughputController" testname="20%用户查看详情" enabled="true">
             <intProp name="ThroughputController.style">1</intProp>
-            <intProp name="ThroughputController.percentThroughput">20</intProp>
+            <boolProp name="ThroughputController.perThread">true</boolProp>
+            <intProp name="ThroughputController.maxThroughput">1</intProp>
+            <FloatProperty>
+              <name>ThroughputController.percentThroughput</name>
+              <value>20.0</value>
+              <savedValue>0.0</savedValue>
+            </FloatProperty>
           </ThroughputController>
           <hashTree>
-            <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="查看活动详情">
-              <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
-                <collectionProp name="Arguments.arguments"/>
-              </elementProp>
-              <stringProp name="HTTPSampler.domain"></stringProp>
-              <stringProp name="HTTPSampler.port"></stringProp>
+            <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="查看活动详情" enabled="true">
               <stringProp name="HTTPSampler.protocol">http</stringProp>
               <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
               <stringProp name="HTTPSampler.path">${BASE_URL}/api/activity/${ACTIVITY_ID}</stringProp>
-              <stringProp name="HTTPSampler.method">GET</stringProp>
               <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
-              <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
+              <stringProp name="HTTPSampler.method">GET</stringProp>
               <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+              <boolProp name="HTTPSampler.postBodyRaw">false</boolProp>
+              <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="User Defined Variables">
+                <collectionProp name="Arguments.arguments"/>
+              </elementProp>
             </HTTPSamplerProxy>
             <hashTree>
-              <ThroughputController guiclass="ThroughputControllerGui" testclass="ThroughputController" testname="100%详情用户尝试抢购">
+              <ThroughputController guiclass="ThroughputControllerGui" testclass="ThroughputController" testname="100%详情用户尝试抢购" enabled="true">
                 <intProp name="ThroughputController.style">1</intProp>
-                <intProp name="ThroughputController.percentThroughput">100</intProp>
+                <boolProp name="ThroughputController.perThread">true</boolProp>
+                <intProp name="ThroughputController.maxThroughput">1</intProp>
+                <FloatProperty>
+                  <name>ThroughputController.percentThroughput</name>
+                  <value>100.0</value>
+                  <savedValue>0.0</savedValue>
+                </FloatProperty>
               </ThroughputController>
               <hashTree>
-                <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="秒杀下单">
+                <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="秒杀下单" enabled="true">
+                  <stringProp name="HTTPSampler.protocol">http</stringProp>
+                  <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
+                  <stringProp name="HTTPSampler.path">${BASE_URL}/api/order/create</stringProp>
+                  <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+                  <stringProp name="HTTPSampler.method">POST</stringProp>
+                  <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
                   <boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
                   <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
                     <collectionProp name="Arguments.arguments">
@@ -362,18 +401,9 @@ if (orderNo != null &amp;&amp; !orderNo.equals(&quot;&quot;) &amp;&amp; !orderNo
                       </elementProp>
                     </collectionProp>
                   </elementProp>
-                  <stringProp name="HTTPSampler.domain"></stringProp>
-                  <stringProp name="HTTPSampler.port"></stringProp>
-                  <stringProp name="HTTPSampler.protocol">http</stringProp>
-                  <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
-                  <stringProp name="HTTPSampler.path">${BASE_URL}/api/order/create</stringProp>
-                  <stringProp name="HTTPSampler.method">POST</stringProp>
-                  <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
-                  <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
-                  <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
                 </HTTPSamplerProxy>
                 <hashTree>
-                  <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="HTTP Header">
+                  <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="HTTP Header" enabled="true">
                     <collectionProp name="HeaderManager.headers">
                       <elementProp name="" elementType="Header">
                         <stringProp name="Header.name">Authorization</stringProp>
@@ -391,56 +421,54 @@ if (orderNo != null &amp;&amp; !orderNo.equals(&quot;&quot;) &amp;&amp; !orderNo
             </hashTree>
           </hashTree>
         </hashTree>
-        <UniformRandomTimer guiclass="UniformRandomTimerGui" testclass="UniformRandomTimer" testname="用户思考时间2秒">
+        <UniformRandomTimer guiclass="UniformRandomTimerGui" testclass="UniformRandomTimer" testname="用户思考时间2秒" enabled="true">
           <stringProp name="ConstantTimer.delay">2000</stringProp>
           <stringProp name="RandomTimer.range">500</stringProp>
         </UniformRandomTimer>
         <hashTree/>
       </hashTree>
-
-      <!-- ==================== 场景3：稳定性测试 ==================== -->
-      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="场景3：稳定性测试（50用户持续10分钟）">
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="场景3：稳定性测试（50用户持续10分钟）" enabled="true">
+        <stringProp name="TestPlan.comments">50个用户持续10分钟进行查询操作
+用于检测内存泄漏、连接池耗尽、MQ消息堆积等问题</stringProp>
         <intProp name="ThreadGroup.num_threads">50</intProp>
         <intProp name="ThreadGroup.ramp_time">10</intProp>
+        <longProp name="ThreadGroup.duration">600</longProp>
+        <boolProp name="ThreadGroup.same_user_on_next_iteration">true</boolProp>
         <boolProp name="ThreadGroup.scheduler">true</boolProp>
-        <stringProp name="ThreadGroup.duration">600</stringProp>
         <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
         <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="循环控制器">
-          <boolProp name="LoopController.continue_forever">false</boolProp>
           <intProp name="LoopController.loops">-1</intProp>
+          <boolProp name="LoopController.continue_forever">false</boolProp>
         </elementProp>
-        <stringProp name="TestPlan.comments">50个用户持续10分钟进行查询操作&#xa;用于检测内存泄漏、连接池耗尽、MQ消息堆积等问题</stringProp>
       </ThreadGroup>
       <hashTree>
-        <CSVDataSet guiclass="TestBeanGUI" testclass="CSVDataSet" testname="读取用户Token">
+        <CSVDataSet guiclass="TestBeanGUI" testclass="CSVDataSet" testname="读取用户Token" enabled="true">
           <stringProp name="delimiter">,</stringProp>
           <stringProp name="fileEncoding">UTF-8</stringProp>
-          <stringProp name="filename">tokens/user_${__threadNum % 500 + 1}.csv</stringProp>
+          <stringProp name="filename">tokens/user_${__threadNum % 1000 + 1}.csv</stringProp>
           <boolProp name="ignoreFirstLine">false</boolProp>
           <boolProp name="quotedData">false</boolProp>
           <boolProp name="recycle">true</boolProp>
           <boolProp name="stopThread">false</boolProp>
           <stringProp name="variableNames">token,userId</stringProp>
           <stringProp name="shareMode.mode">shareMode.all</stringProp>
+          <stringProp name="shareMode">shareMode.all</stringProp>
         </CSVDataSet>
         <hashTree/>
-
-        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="查询我的订单">
-          <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
-            <collectionProp name="Arguments.arguments"/>
-          </elementProp>
-          <stringProp name="HTTPSampler.domain"></stringProp>
-          <stringProp name="HTTPSampler.port"></stringProp>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="查询我的订单" enabled="true">
           <stringProp name="HTTPSampler.protocol">http</stringProp>
           <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
           <stringProp name="HTTPSampler.path">${BASE_URL}/api/order/my</stringProp>
-          <stringProp name="HTTPSampler.method">GET</stringProp>
           <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
-          <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
+          <stringProp name="HTTPSampler.method">GET</stringProp>
           <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <boolProp name="HTTPSampler.postBodyRaw">false</boolProp>
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="User Defined Variables">
+            <collectionProp name="Arguments.arguments"/>
+          </elementProp>
         </HTTPSamplerProxy>
         <hashTree>
-          <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="HTTP Header">
+          <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="HTTP Header" enabled="true">
             <collectionProp name="HeaderManager.headers">
               <elementProp name="" elementType="Header">
                 <stringProp name="Header.name">Authorization</stringProp>
@@ -450,16 +478,13 @@ if (orderNo != null &amp;&amp; !orderNo.equals(&quot;&quot;) &amp;&amp; !orderNo
           </HeaderManager>
           <hashTree/>
         </hashTree>
-
-        <UniformRandomTimer guiclass="UniformRandomTimerGui" testclass="UniformRandomTimer" testname="思考时间3秒">
+        <UniformRandomTimer guiclass="UniformRandomTimerGui" testclass="UniformRandomTimer" testname="思考时间3秒" enabled="true">
           <stringProp name="ConstantTimer.delay">3000</stringProp>
           <stringProp name="RandomTimer.range">1000</stringProp>
         </UniformRandomTimer>
         <hashTree/>
       </hashTree>
-
-      <!-- ==================== 监听器 ==================== -->
-      <ResultCollector guiclass="ViewResultsFullVisualizer" testclass="ResultCollector" testname="察看结果树">
+      <ResultCollector guiclass="ViewResultsFullVisualizer" testclass="ResultCollector" testname="察看结果树" enabled="true">
         <boolProp name="ResultCollector.error_logging">false</boolProp>
         <objProp>
           <name>saveConfig</name>
@@ -496,8 +521,7 @@ if (orderNo != null &amp;&amp; !orderNo.equals(&quot;&quot;) &amp;&amp; !orderNo
         <stringProp name="filename"></stringProp>
       </ResultCollector>
       <hashTree/>
-
-      <ResultCollector guiclass="SummaryReport" testclass="ResultCollector" testname="聚合报告">
+      <ResultCollector guiclass="SummaryReport" testclass="ResultCollector" testname="聚合报告" enabled="true">
         <boolProp name="ResultCollector.error_logging">false</boolProp>
         <objProp>
           <name>saveConfig</name>
@@ -534,7 +558,6 @@ if (orderNo != null &amp;&amp; !orderNo.equals(&quot;&quot;) &amp;&amp; !orderNo
         <stringProp name="filename"></stringProp>
       </ResultCollector>
       <hashTree/>
-
     </hashTree>
   </hashTree>
 </jmeterTestPlan>

@@ -21,6 +21,11 @@ public class MqConstant {
     public static final String STOCK_ROLLBACK_TOPIC = "STOCK_ROLLBACK_TOPIC";
 
     /**
+     * 活动失效主题（活动删除/过期时通知订单服务）
+     */
+    public static final String ACTIVITY_INVALIDATE_TOPIC = "ACTIVITY_INVALIDATE_TOPIC";
+
+    /**
      * 库存扣减消费者组（消费订单创建消息）
      */
     public static final String STOCK_DEDUCT_CONSUMER_GROUP = "INVENTORY_DEDUCT_CONSUMER_GROUP";

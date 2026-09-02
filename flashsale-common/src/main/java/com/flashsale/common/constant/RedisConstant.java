@@ -49,4 +49,16 @@ public class RedisConstant {
      * 活动状态切换锁
      */
     public static final String ACTIVITY_STATUS_LOCK = "activity:status:lock:";
+
+    /**
+     * 支付处理锁前缀（防重复提交）
+     * Key: payment:lock:{orderNo}  TTL: 300s
+     */
+    public static final String PAY_LOCK_PREFIX = "payment:lock:";
+
+    /**
+     * 支付完成标记前缀（幂等）
+     * Key: payment:done:{orderNo}  TTL: 24h
+     */
+    public static final String PAY_DONE_PREFIX = "payment:done:";
 }

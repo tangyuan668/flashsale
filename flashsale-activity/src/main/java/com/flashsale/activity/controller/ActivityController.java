@@ -1,6 +1,7 @@
 package com.flashsale.activity.controller;
 
 import com.flashsale.activity.dto.ActivityCreateRequest;
+import com.flashsale.activity.dto.ActivityItemAddRequest;
 import com.flashsale.activity.service.ActivityService;
 import com.flashsale.activity.vo.ActivityVO;
 import com.flashsale.common.Result;
@@ -71,5 +72,45 @@ public class ActivityController {
                                               @RequestParam("status") Integer status) {
         activityService.updateActivityStatus(activityId, status);
         return Result.ok("状态更新成功", null);
+    }
+
+    /**
+     * 给活动添加秒杀商品
+     * POST /api/activity/{id}/items
+     */
+    @PostMapping("/{id}/items")
+    public Result<Void> addItem(@PathVariable("id") Long activityId,
+                                @Valid @RequestBody ActivityItemAddRequest request) {
+        activityService.addItem(activityId, request);
+        return Result.ok("添加商品成功", null);
+    }
+
+    /**
+     * 下架活动商品
+     * DELETE /api/activity/{activityId}/items/{itemId}
+     */
+    @DeleteMapping("/{activityId}/items/{itemId}")
+    public Result<Void> removeItem(@PathVariable("activityId") Long activityId,
+                                   @PathVariable("itemId") Long itemId) {
+        activityService.removeItem(activityId, itemId);
+        return Result.ok("下架成功", null);
+    }
+
+    /**
+     * 删除活动
+     * DELETE /api/activity/{id}
+     */
+    @DeleteMapping("/{id}")
+    public Result<Void> deleteActivity(@PathVariable("id") Long activityId) {
+        activityService.deleteActivity(activityId);
+        return Result.ok("删除成功", null);
+    }
+
+    /**
+     * 获取活动总数（内部调用）
+     */
+    @GetMapping("/count")
+    public Result<Long> getActivityCount() {
+        return Result.ok(activityService.getActivityCount());
     }
 }

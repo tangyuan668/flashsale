@@ -56,6 +56,11 @@ public class User {
     private LocalDateTime updateTime;
 
     /**
+     * 角色: 0-普通用户, 1-管理员
+     */
+    private Integer role;
+
+    /**
      * 逻辑删除: 1-已删除, 0-未删除
      */
     @TableLogic

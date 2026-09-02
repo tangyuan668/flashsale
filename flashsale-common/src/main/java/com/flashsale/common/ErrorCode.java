@@ -29,6 +29,7 @@ public enum ErrorCode {
     ACTIVITY_NOT_STARTED(3002, "活动未开始"),
     ACTIVITY_ENDED(3003, "活动已结束"),
     ACTIVITY_NOT_AVAILABLE(3004, "活动不可用"),
+    ITEM_ALREADY_EXISTS(3005, "商品已存在于该活动中"),
 
     // 库存相关 4xxx
     STOCK_NOT_ENOUGH(4001, "库存不足"),
@@ -45,7 +46,14 @@ public enum ErrorCode {
     ANTI_BRUSH_BLOCKED(6002, "触发防刷限制"),
 
     // RocketMQ相关 7xxx
-    MQ_SEND_FAILED(7001, "消息发送失败");
+    MQ_SEND_FAILED(7001, "消息发送失败"),
+
+    // 支付相关 8xxx
+    PAY_ORDER_NOT_PENDING(8001, "订单非待支付状态"),
+    PAY_DUPLICATE_REQUEST(8002, "重复支付请求"),
+    PAY_METHOD_INVALID(8003, "不支持的支付方式"),
+    PAY_AMOUNT_MISMATCH(8004, "支付金额不匹配"),
+    PAY_FAILED(8005, "支付处理失败");
 
     private final Integer code;
     private final String message;

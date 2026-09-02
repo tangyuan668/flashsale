@@ -18,4 +18,10 @@ public interface ActivityFeignClient {
      */
     @GetMapping("/{id}")
     Result<ActivityDto> getActivityDetail(@PathVariable("id") Long id);
+
+    /**
+     * 获取活动总数
+     */
+    @GetMapping("/count")
+    Result<Long> getActivityCount();
 }

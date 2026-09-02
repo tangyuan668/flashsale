@@ -38,6 +38,7 @@ public class AuthenticationFilter implements GlobalFilter, Ordered {
     private static final String TOKEN_PREFIX = "Bearer ";
     private static final String USER_ID_HEADER = "X-User-Id";
     private static final String PHONE_HEADER = "X-Phone";
+    private static final String ROLE_HEADER = "X-User-Role";
 
     private final SecretKey key = Keys.hmacShaKeyFor(SECRET_KEY.getBytes(StandardCharsets.UTF_8));
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -86,10 +87,12 @@ public class AuthenticationFilter implements GlobalFilter, Ordered {
             // 提取用户信息并添加到请求头
             Long userId = claims.get("userId", Long.class);
             String phone = claims.get("phone", String.class);
+            Integer role = claims.get("role", Integer.class);
 
             ServerHttpRequest mutatedRequest = request.mutate()
                     .header(USER_ID_HEADER, String.valueOf(userId))
                     .header(PHONE_HEADER, phone)
+                    .header(ROLE_HEADER, String.valueOf(role != null ? role : 0))
                     .build();
 
             return chain.filter(exchange.mutate().request(mutatedRequest).build());

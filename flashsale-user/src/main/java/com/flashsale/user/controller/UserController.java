@@ -61,4 +61,12 @@ public class UserController {
         userService.logout(userId);
         return Result.ok("登出成功", null);
     }
+
+    /**
+     * 获取用户总数（内部调用）
+     */
+    @GetMapping("/count")
+    public Result<Long> getUserCount() {
+        return Result.ok(userService.getUserCount());
+    }
 }

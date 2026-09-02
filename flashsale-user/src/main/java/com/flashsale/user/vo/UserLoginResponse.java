@@ -36,4 +36,9 @@ public class UserLoginResponse {
      * 头像
      */
     private String avatar;
+
+    /**
+     * 角色: 0-普通用户, 1-管理员
+     */
+    private Integer role;
 }

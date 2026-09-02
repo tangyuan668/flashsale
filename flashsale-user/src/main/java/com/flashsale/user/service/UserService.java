@@ -89,7 +89,7 @@ public class UserService {
         }
 
         // 生成Token
-        String token = jwtUtil.generateToken(user.getId(), user.getPhone());
+        String token = jwtUtil.generateToken(user.getId(), user.getPhone(), user.getRole());
 
         // 缓存Token到Redis
         String cacheKey = USER_TOKEN_PREFIX + user.getId();
@@ -97,7 +97,7 @@ public class UserService {
 
         log.info("用户登录成功: phone={}", request.getPhone());
 
-        return new UserLoginResponse(token, user.getId(), user.getPhone(), user.getNickname(), user.getAvatar());
+        return new UserLoginResponse(token, user.getId(), user.getPhone(), user.getNickname(), user.getAvatar(), user.getRole());
     }
 
     /**
@@ -115,7 +115,8 @@ public class UserService {
                 user.getNickname(),
                 user.getAvatar(),
                 user.getStatus(),
-                user.getCreateTime()
+                user.getCreateTime(),
+                user.getRole()
         );
     }
 
@@ -141,6 +142,14 @@ public class UserService {
         String cacheKey = USER_TOKEN_PREFIX + userId;
         String cachedToken = (String) redisTemplate.opsForValue().get(cacheKey);
         return token.equals(cachedToken);
+    }
+
+    /**
+     * 获取用户总数
+     */
+    public Long getUserCount() {
+        return userMapper.selectCount(new LambdaQueryWrapper<User>()
+                .eq(User::getRole, 0));
     }
 
     /**

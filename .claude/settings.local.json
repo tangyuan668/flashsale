@@ -49,7 +49,31 @@
       "Bash(curl -s -H \"Accept: application/vnd.github.v3.raw\" \"https://api.github.com/repos/apache/rocketmq/contents/store/src/main/java/org/apache/rocketmq/store/DefaultMessageStore.java?ref=master\")",
       "Bash(curl *)",
       "Bash(redis-cli -h localhost -p 6379 EXISTS \"activity:item:1:1001\")",
-      "mcp__zai-mcp-server__analyze_data_visualization"
+      "mcp__zai-mcp-server__analyze_data_visualization",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(npm create *)",
+      "Bash(npm install *)",
+      "Bash(npx vite *)",
+      "Bash(mvn compile *)",
+      "Bash(java *)",
+      "Bash(where java *)",
+      "Read(//c/Program Files/**)",
+      "Read(//f/111/**)",
+      "Bash(mkdir -p \"F:/111\")",
+      "Bash(cp \"D:/桌面/毕设/最终/本科生毕业论文格式v4.0.docx\" \"F:/111/format_req.docx\")",
+      "Bash(cp \"D:/桌面/毕设/最终/本科生毕业设计论文模板----软件工程系（2021版）.doc\" \"F:/111/template.doc\")",
+      "Bash(cp \"D:/桌面/毕设/最终/（202211040450史佳楠）本科毕业设计（论文）任务书.doc\" \"F:/111/task_book.doc\")",
+      "Bash(cp \"D:/桌面/毕设/最终/202211040450-史佳楠-基于Redis的高并发实时秒杀系统的设计与实现-本科毕业设计（论文）开题报告.docx\" \"F:/111/opening_report.docx\")",
+      "Bash(cp \"D:/桌面/毕设/最终/202211040450-史佳楠-基于Redis的高并发实时秒杀系统的设计与实现-本科毕业设计（论文）中期报告.docx\" \"F:/111/midterm_report.docx\")",
+      "mcp__web-search-prime__web_search_prime",
+      "WebSearch",
+      "Bash(cat /c/Users/Administrator/logs/rocketmqlogs/*.log)",
+      "Read(//f/develop_tools/rocketmq-all-5.3.0-bin-release/rocketmq-all-5.3.0-bin-release/**)",
+      "Bash(export ROCKETMQ_HOME=\"F:/develop_tools/rocketmq-all-5.3.0-bin-release/rocketmq-all-5.3.0-bin-release\")",
+      "Bash(./bin/mqbroker.cmd -n localhost:9876 autoCreateTopicEnable=true)",
+      "Bash(taskkill *)",
+      "Read(//f/项目/毕设/frontend/**)",
+      "Read(//f/项目/毕设/frontend/src/**)"
     ]
   }
 }

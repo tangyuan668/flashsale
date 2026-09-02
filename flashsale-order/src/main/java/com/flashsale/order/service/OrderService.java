@@ -527,6 +527,32 @@ public class OrderService {
     }
 
     /**
+     * 获取所有订单列表（管理员）
+     */
+    public List<OrderDetailResponse> getAllOrders() {
+        LambdaQueryWrapper<OrderInfo> wrapper = new LambdaQueryWrapper<>();
+        wrapper.orderByDesc(OrderInfo::getCreateTime)
+                .last("LIMIT 100");
+
+        List<OrderInfo> orderInfos = orderInfoMapper.selectList(wrapper);
+
+        return orderInfos.stream().map(orderInfo -> {
+            OrderDetailResponse response = new OrderDetailResponse();
+            response.setId(orderInfo.getId());
+            response.setOrderNo(orderInfo.getOrderNo());
+            response.setUserId(orderInfo.getUserId());
+            response.setActivityId(orderInfo.getActivityId());
+            response.setTotalAmount(orderInfo.getTotalAmount());
+            response.setStatus(orderInfo.getStatus());
+            response.setStatusDesc(getStatusDesc(orderInfo.getStatus()));
+            response.setPayTime(orderInfo.getPayTime());
+            response.setCancelTime(orderInfo.getCancelTime());
+            response.setCreateTime(orderInfo.getCreateTime());
+            return response;
+        }).toList();
+    }
+
+    /**
      * 取消订单（CAS 乐观锁方式，防止多实例重复处理）
      */
     @Transactional(rollbackFor = Exception.class)
@@ -631,8 +657,71 @@ public class OrderService {
             case 1 -> "已支付";
             case 2 -> "已取消";
             case 3 -> "已超时";
+            case 4 -> "已失效";
             default -> "未知";
         };
+    }
+
+    /**
+     * 失效指定活动的所有待支付订单（活动删除/过期时调用）
+     */
+    public void invalidateOrders(Long activityId, String reason) {
+        // 查询该活动下所有待支付订单
+        LambdaQueryWrapper<OrderInfo> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(OrderInfo::getActivityId, activityId)
+                .eq(OrderInfo::getStatus, 0);
+        List<OrderInfo> pendingOrders = orderInfoMapper.selectList(queryWrapper);
+
+        if (pendingOrders.isEmpty()) {
+            log.info("活动{}没有待支付订单，无需失效", activityId);
+            return;
+        }
+
+        // 批量 CAS 更新：status=0 → status=4
+        for (OrderInfo order : pendingOrders) {
+            LambdaUpdateWrapper<OrderInfo> updateWrapper = new LambdaUpdateWrapper<>();
+            updateWrapper.eq(OrderInfo::getOrderNo, order.getOrderNo())
+                    .eq(OrderInfo::getStatus, 0)
+                    .set(OrderInfo::getStatus, 4)
+                    .set(OrderInfo::getCancelTime, LocalDateTime.now());
+
+            int affected = orderInfoMapper.update(null, updateWrapper);
+            if (affected > 0) {
+                // 清理用户购买标记 + 发送库存回滚
+                List<OrderItem> orderItems = orderItemMapper.selectList(
+                        new LambdaQueryWrapper<OrderItem>()
+                                .eq(OrderItem::getOrderNo, order.getOrderNo())
+                );
+                for (OrderItem orderItem : orderItems) {
+                    String stockKey = RedisConstant.STOCK_CACHE_PREFIX + activityId + ":" + orderItem.getItemId();
+                    String purchaseKey = "user:purchase:" + order.getUserId() + ":" + stockKey;
+                    redisTemplate.delete(purchaseKey);
+
+                    // 发送库存回滚消息
+                    com.flashsale.common.dto.StockRollbackMessage rollbackMessage =
+                            new com.flashsale.common.dto.StockRollbackMessage();
+                    rollbackMessage.setOrderNo(order.getOrderNo());
+                    rollbackMessage.setActivityId(activityId);
+                    rollbackMessage.setItemId(orderItem.getItemId());
+                    rollbackMessage.setQuantity(orderItem.getQuantity());
+                    rollbackMessage.setUserId(order.getUserId());
+
+                    try {
+                        localMessageService.saveMessage(order.getOrderNo(),
+                                com.flashsale.common.constant.MqConstant.STOCK_ROLLBACK_TOPIC, rollbackMessage);
+                        rocketMQTemplate.syncSend(
+                                com.flashsale.common.constant.MqConstant.STOCK_ROLLBACK_TOPIC, rollbackMessage);
+                        localMessageService.markMessageAsSent(order.getOrderNo());
+                    } catch (Exception e) {
+                        log.error("失效订单库存回滚消息发送失败: orderNo={}", order.getOrderNo(), e);
+                    }
+                }
+
+                log.info("订单已失效: orderNo={}, reason={}", order.getOrderNo(), reason);
+            }
+        }
+
+        log.info("活动{}订单失效完成，共处理{}笔，reason={}", activityId, pendingOrders.size(), reason);
     }
 
     /**

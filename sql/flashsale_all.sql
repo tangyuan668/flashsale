@@ -1,4 +1,4 @@
--- =============================================
+   -- =============================================
 -- FlashSale 秒杀系统 - 完整数据库初始化脚本
 -- =============================================
 -- 执行方式: mysql -u root -p < flashsale_all.sql
@@ -12,21 +12,6 @@ USE `flashsale_user`;
 -- ---------------------------------------------
 -- 用户表
 -- ---------------------------------------------
-DROP TABLE IF EXISTS `user`;
-CREATE TABLE `user` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '用户ID',
-    `phone` VARCHAR(11) NOT NULL COMMENT '手机号',
-    `password` VARCHAR(128) NOT NULL COMMENT '密码(BCrypt加密)',
-    `nickname` VARCHAR(32) DEFAULT NULL COMMENT '昵称',
-    `avatar` VARCHAR(255) DEFAULT NULL COMMENT '头像URL',
-    `status` TINYINT NOT NULL DEFAULT 1 COMMENT '状态: 1-正常, 0-禁用',
-    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除: 1-已删除, 0-未删除',
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_phone` (`phone`),
-    KEY `idx_status` (`status`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户表';
 
 -- ---------------------------------------------
 -- 初始化测试数据
@@ -222,6 +207,30 @@ CREATE TABLE `order_item` (
     KEY `idx_order_id` (`order_id`),
     KEY `idx_order_no` (`order_no`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单明细表';
+
+-- ---------------------------------------------
+-- 支付记录表
+-- ---------------------------------------------
+DROP TABLE IF EXISTS `payment`;
+CREATE TABLE `payment` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '支付ID',
+    `pay_no` VARCHAR(64) NOT NULL COMMENT '支付流水号（雪花ID）',
+    `order_no` VARCHAR(64) NOT NULL COMMENT '订单号',
+    `user_id` BIGINT NOT NULL COMMENT '用户ID',
+    `amount` DECIMAL(10,2) NOT NULL COMMENT '支付金额',
+    `pay_method` VARCHAR(20) NOT NULL COMMENT '支付方式: alipay/wechat/mock',
+    `status` TINYINT NOT NULL DEFAULT 0 COMMENT '支付状态: 0-处理中, 1-成功, 2-失败',
+    `transaction_no` VARCHAR(128) DEFAULT NULL COMMENT '模拟第三方交易号',
+    `pay_time` DATETIME DEFAULT NULL COMMENT '支付完成时间',
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除: 1-已删除, 0-未删除',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_pay_no` (`pay_no`),
+    KEY `idx_order_no` (`order_no`),
+    KEY `idx_user_id` (`user_id`),
+    KEY `idx_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='支付记录表';
 
 -- ---------------------------------------------
 -- 本地消息表（用于保障 MQ 消息可靠性）

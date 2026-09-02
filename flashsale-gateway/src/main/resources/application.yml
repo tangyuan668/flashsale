@@ -48,6 +48,20 @@ spring:
             - Path=/api/order/**
           filters:
             - StripPrefix=1
+        # Payment服务路由（Order服务内）
+        - id: flashsale-payment
+          uri: lb://flashsale-order
+          predicates:
+            - Path=/api/payment/**
+          filters:
+            - StripPrefix=1
+        # Stat统计路由（Order服务内）
+        - id: flashsale-stat
+          uri: lb://flashsale-order
+          predicates:
+            - Path=/api/stat/**
+          filters:
+            - StripPrefix=1
   # Redis
   data:
     redis:
